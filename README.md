@@ -12,10 +12,10 @@ Free trials and small subscriptions are easy to forget about and hard to reason 
 |---|---|---|
 | **PayPal sandbox subscription** | Shows the status, price and billing dates of **one** demo subscription created by this project's own setup scripts; pause/resume it from the dashboard. | Sandbox-only and scoped to the one subscription this project creates for itself. It cannot discover, list or act on a real user's own PayPal subscriptions, there is no such API call anywhere in this codebase. |
 | **Free trial tracking** | Add, edit, delete and see day-count/"ending soon" status for trials you enter yourself or import from pasted text. | Tracking-only: dates and prices you (or an AI extraction) entered. Nothing here is connected to the provider and nothing cancels billing automatically. |
-| **"Import from text" (AI-assisted)** | Pastes a confirmation email/receipt and extracts service name, end date, price, etc. via a local Ollama model. Every field is shown with its supporting quote for you to verify before saving. | Every extracted field still requires your review and an explicit Save — nothing is stored until you confirm it. Unavailable if Ollama isn't running. |
-| **Upcoming trial deadlines** | In-dashboard alerts for trials nearing their reminder window. | Only visible while the dashboard tab is open — no email, push, or background notifications. |
-| **Calendar export (.ics)** | Downloads a one-time calendar file with a single reminder alert for a trial. | A static snapshot: editing or deleting the trial afterward does not update or remove the calendar event, and re-downloading creates a duplicate, not a replacement. |
-| **Budget conversation** | Set a monthly budget; see it compared against your tracked trial renewals (labeled as planned/potential costs, not bank spending); ask suggested or free-text questions, including "what if I don't renew X" hypotheticals. | All arithmetic happens in plain code — the AI model (when used) only classifies which question you're asking and which record you mean; it never computes or states a dollar amount itself. Hypothetical questions never change, pause, or cancel anything. The sandbox PayPal subscription's amount is never added into this total. |
+| **"Import from text" (AI-assisted)** | Pastes a confirmation email/receipt and extracts service name, end date, price, etc. via a local Ollama model. Every field is shown with its supporting quote for you to verify before saving. | Every extracted field still requires your review and an explicit Save, nothing is stored until you confirm it. Unavailable if Ollama isn't running. |
+| **Upcoming trial deadlines** | In-dashboard alerts for trials nearing their reminder window. | Only visible while the dashboard tab is open, no email, push or background notifications. |
+| **Calendar export (.ics)** | Downloads a one-time calendar file with a single reminder alert for a trial. | A static snapshot: editing or deleting the trial afterward does not update or remove the calendar event and re-downloading creates a duplicate, not a replacement. |
+| **Budget conversation** | Set a monthly budget; see it compared against your tracked trial renewals (labeled as planned/potential costs, not bank spending); ask suggested or free-text questions, including "what if I don't renew X" hypotheticals. | All arithmetic happens in plain code, the AI model (when used) only classifies which question you're asking and which record you mean; it never computes or states a dollar amount itself. Hypothetical questions never change, pause, or cancel anything. The sandbox PayPal subscription's amount is never added into this total. |
 
 ## Architecture & stack
 
@@ -25,7 +25,6 @@ Free trials and small subscriptions are easy to forget about and hard to reason 
 - **PayPal**: the official sandbox REST API (`https://api-m.sandbox.paypal.com`), called directly via `fetch` — no PayPal SDK.
 - **AI**: a single active provider, picked by `AI_PROVIDER`:
   - `ollama` (default) — calls a local Ollama server over loopback only; refuses to call anything else.
-  - `anthropic` (optional) — the Claude API, only used if you explicitly opt in and supply a key.
   
   Both expose the same `createStructuredMessage({ system, messages, schema })` shape, so the rest of the app doesn't know which one is active.
 
