@@ -161,9 +161,27 @@ describe("hypotheticalResumptionAnswer", () => {
     const answer = hypotheticalResumptionAnswer(summary);
     const text = answer.body.join(" ");
     assert.ok(!/\bsave(d|s)?\b/i.test(text), "must not claim a savings amount");
-    assert.ok(!/immediately charged|charged immediately/i.test(text), "must not claim an immediate charge");
+    assert.ok(!/immediate charge/i.test(text), "must not claim (or disclaim) an immediate charge at all");
     assert.ok(/next charge date can't currently be confirmed/i.test(text));
     assert.ok(answer.body.some((line) => line.includes("No subscription was changed")));
+  });
+
+  test("paused: scopes the missing-next-billing-date observation to this subscription, not all paused subscriptions", () => {
+    const summary = summaryWithSandbox({
+      summary: {
+        status: "SUSPENDED",
+        planName: "StreamBox",
+        recurringPrice: { value: "12.00", currencyCode: "USD", intervalUnit: "MONTH", intervalCount: 1 },
+      },
+    });
+    const answer = hypotheticalResumptionAnswer(summary);
+    const billingLine = answer.body.find((line) => line.includes("next charge date can't currently be confirmed"));
+    assert.ok(billingLine, "expected the next-charge-date disclaimer line to be present");
+    assert.ok(billingLine.includes("for this subscription"), "must scope the claim to this subscription");
+    assert.ok(
+      !/while a subscription is paused|all paused subscriptions|any paused subscription/i.test(billingLine),
+      "must not generalize to all/any paused subscriptions"
+    );
   });
 
   test("paused: with no reported price, says terms can't be verified rather than guessing", () => {

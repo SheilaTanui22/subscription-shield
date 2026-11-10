@@ -222,16 +222,16 @@ function planTermsLabel(sandbox) {
 // trials have no active/paused state to resume.
 //
 // It never invents a next charge date, an immediate charge, or a savings
-// figure. The "next charge date can't currently be confirmed" claim is
-// deliberately NOT attributed to this app's own `nextBillingTime: null`
-// suppression for non-active subscriptions (see subscription-service.mjs)
-// — that's an internal display choice, not evidence of what PayPal itself
-// reports. It's phrased as PayPal's own behavior only because that was
-// independently verified against the raw PayPal API response for a
-// SUSPENDED subscription (billing_info has no next_billing_time key at
-// all while suspended, not just a null value) — if that ever needs
-// re-checking, fall back to the safer "can't currently be confirmed"
-// framing alone.
+// figure. The "next charge date can't currently be confirmed" claim leads
+// every time, and is NOT attributed to this app's own `nextBillingTime:
+// null` suppression for non-active subscriptions (see
+// subscription-service.mjs) — that's an internal display choice, not
+// evidence of what PayPal itself reports. The follow-up detail (PayPal's
+// own data not currently including a next billing date) is scoped to
+// *this subscription's* observed data only — verified once against the
+// raw PayPal API response for this one SUSPENDED subscription, not
+// generalized into a blanket claim about every paused PayPal
+// subscription's behavior, which hasn't been verified.
 export function hypotheticalResumptionAnswer(summary, { negated = false } = {}) {
   const sandbox = summary.paypalSandbox;
   const name = sandbox.serviceName ?? "your PayPal sandbox subscription";
@@ -258,7 +258,7 @@ export function hypotheticalResumptionAnswer(summary, { negated = false } = {}) 
           : "Its plan price, currency, and billing frequency could not be verified, so this can't describe exact billing terms."
       );
       body.push(
-        "The next charge date can't currently be confirmed: PayPal's own subscription data doesn't include a next billing date while a subscription is paused — this would not be an immediate charge."
+        "The next charge date can't currently be confirmed — PayPal's own data for this subscription doesn't currently include a next billing date."
       );
       body.push("No subscription was changed — this is a hypothetical comparison only.");
       body.push("To actually resume it, use the existing Resume subscription control on the dashboard.");
