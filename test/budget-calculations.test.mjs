@@ -137,6 +137,39 @@ describe("categorizePaypalSubscription", () => {
     assert.equal(result.category, "paused");
   });
 
+  test("SUSPENDED status still preserves the plan's verified price, currency, and billing frequency", () => {
+    // A paused subscription's own plan terms don't disappear — PayPal's
+    // plan endpoint reports them regardless of the subscription's status.
+    const result = categorizePaypalSubscription({
+      summary: {
+        status: "SUSPENDED",
+        planName: "StreamBox",
+        recurringPrice: { value: "12.00", currencyCode: "USD", intervalUnit: "MONTH", intervalCount: 1 },
+      },
+    });
+    assert.equal(result.category, "paused");
+    assert.equal(result.renewalPriceCents, 1200);
+    assert.equal(result.currency, "USD");
+    assert.equal(result.billingFrequency, "monthly");
+  });
+
+  test("SUSPENDED status with no reported price omits plan terms rather than inventing them", () => {
+    const result = categorizePaypalSubscription({ summary: { status: "SUSPENDED", planName: "StreamBox" } });
+    assert.equal(result.renewalPriceCents, undefined);
+  });
+
+  test("an unrecognized status also preserves plan terms when PayPal reports a price", () => {
+    const result = categorizePaypalSubscription({
+      summary: {
+        status: "EXPIRED",
+        planName: "StreamBox",
+        recurringPrice: { value: "12.00", currencyCode: "USD", intervalUnit: "MONTH", intervalCount: 1 },
+      },
+    });
+    assert.equal(result.category, "unknown");
+    assert.equal(result.renewalPriceCents, 1200);
+  });
+
   test("an unrecognized status becomes category 'unknown', never silently active or zero", () => {
     const result = categorizePaypalSubscription({ summary: { status: "EXPIRED", planName: "StreamBox" } });
     assert.equal(result.category, "unknown");

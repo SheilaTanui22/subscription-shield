@@ -470,6 +470,228 @@ describe("POST /api/budget/ask (AI-assisted free text)", () => {
   });
 });
 
+describe("POST /api/budget/ask: hypothetical resumption (regression)", () => {
+  async function startWithPausedSandbox(conversationClient) {
+    return startTestServer({
+      conversationClient,
+      fetchPaypalSummary: async () => ({
+        status: "SUSPENDED",
+        planName: "StreamBox",
+        recurringPrice: { value: "12.00", currencyCode: "USD", intervalUnit: "MONTH", intervalCount: 1 },
+      }),
+    });
+  }
+
+  test('reported question 1: "What happens if I unpause StreamBox?" gets a resumption-specific answer, not the exclusion one', async () => {
+    const ctx = await startWithPausedSandbox(
+      stubConversationClient({ intent: "hypothetical_resumption", serviceNames: ["StreamBox"] })
+    );
+    try {
+      const response = await fetch(`${ctx.baseUrl}/api/budget/ask`, {
+        method: "POST",
+        headers: ctx.sameOrigin,
+        body: JSON.stringify({ text: "What happens if I unpause StreamBox?" }),
+      });
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.type, "answer");
+      assert.equal(body.answer.headline, "Hypothetical: what if you resume StreamBox?");
+      assert.notEqual(body.answer.headline, "Hypothetical: what if you don't renew?");
+      assert.ok(body.answer.body.some((line) => line.includes("$12.00/month")));
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  test('reported question 2: "What happens if I add StreamBox back?" gets the same resumption-specific answer', async () => {
+    const ctx = await startWithPausedSandbox(
+      stubConversationClient({ intent: "hypothetical_resumption", serviceNames: ["StreamBox"] })
+    );
+    try {
+      const response = await fetch(`${ctx.baseUrl}/api/budget/ask`, {
+        method: "POST",
+        headers: ctx.sameOrigin,
+        body: JSON.stringify({ text: "What happens if I add StreamBox back?" }),
+      });
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.answer.headline, "Hypothetical: what if you resume StreamBox?");
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  test('full rendered answer: "What happens if I unpause StreamBox?" (affirmative) describes resuming it, not that it stays paused', async () => {
+    const ctx = await startWithPausedSandbox(
+      stubConversationClient({ intent: "hypothetical_resumption", serviceNames: ["StreamBox"], negated: false })
+    );
+    try {
+      const response = await fetch(`${ctx.baseUrl}/api/budget/ask`, {
+        method: "POST",
+        headers: ctx.sameOrigin,
+        body: JSON.stringify({ text: "What happens if I unpause StreamBox?" }),
+      });
+      const body = await response.json();
+      assert.equal(body.answer.headline, "Hypothetical: what if you resume StreamBox?");
+      assert.deepEqual(body.answer.body, [
+        '"StreamBox" is currently paused.',
+        "Resuming it would restore billing at its last verified plan terms: $12.00/month (USD). This is sandbox/demo data — never added to your tracked potential-renewal total.",
+        "The next charge date can't currently be confirmed: PayPal's own subscription data doesn't include a next billing date while a subscription is paused — this would not be an immediate charge.",
+        "No subscription was changed — this is a hypothetical comparison only.",
+        "To actually resume it, use the existing Resume subscription control on the dashboard.",
+      ]);
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  test('full rendered answer: "What if I don\'t unpause StreamBox?" (negated) explains it stays paused, not that it was resumed', async () => {
+    const ctx = await startWithPausedSandbox(
+      stubConversationClient({ intent: "hypothetical_resumption", serviceNames: ["StreamBox"], negated: true })
+    );
+    try {
+      const response = await fetch(`${ctx.baseUrl}/api/budget/ask`, {
+        method: "POST",
+        headers: ctx.sameOrigin,
+        body: JSON.stringify({ text: "What if I don't unpause StreamBox?" }),
+      });
+      const body = await response.json();
+      assert.equal(body.answer.headline, "Hypothetical: what if you don't resume StreamBox?");
+      assert.notEqual(body.answer.headline, "Hypothetical: what if you resume StreamBox?");
+      assert.deepEqual(body.answer.body, [
+        '"StreamBox" is currently paused.',
+        "If you don't resume it, it stays paused and billing remains stopped — nothing changes unless it's explicitly resumed.",
+        "For reference, its last verified plan terms were $12.00/month (USD) — sandbox/demo data, never part of your tracked potential-renewal total.",
+        "No subscription was changed — this is a hypothetical comparison only.",
+      ]);
+      // Must not read as though the positive (resuming) scenario was asked for.
+      assert.ok(!body.answer.body.some((line) => /^resuming it would restore billing/i.test(line)));
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  test("already-active subscription: explains nothing needs resuming", async () => {
+    const ctx = await startTestServer({
+      conversationClient: stubConversationClient({ intent: "hypothetical_resumption", serviceNames: ["StreamBox"] }),
+      fetchPaypalSummary: async () => ({
+        status: "ACTIVE",
+        planName: "StreamBox",
+        recurringPrice: { value: "12.00", currencyCode: "USD", intervalUnit: "MONTH", intervalCount: 1 },
+      }),
+    });
+    try {
+      const response = await fetch(`${ctx.baseUrl}/api/budget/ask`, {
+        method: "POST",
+        headers: ctx.sameOrigin,
+        body: JSON.stringify({ text: "What if I unpause StreamBox?" }),
+      });
+      const body = await response.json();
+      assert.ok(body.answer.body.some((line) => line.includes("already active")));
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  test("unknown subscription name is rejected, not silently matched", async () => {
+    const ctx = await startWithPausedSandbox(
+      stubConversationClient({ intent: "hypothetical_resumption", serviceNames: ["Ghost Service"] })
+    );
+    try {
+      const response = await fetch(`${ctx.baseUrl}/api/budget/ask`, {
+        method: "POST",
+        headers: ctx.sameOrigin,
+        body: JSON.stringify({ text: "What if I resume Ghost Service?" }),
+      });
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.type, "rejected");
+      assert.ok(body.answer.body.some((line) => line.includes("Ghost Service")));
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  test("PayPal data unavailable: states the scenario can't be confirmed", async () => {
+    const ctx = await startTestServer({
+      conversationClient: stubConversationClient({ intent: "hypothetical_resumption", serviceNames: ["StreamBox"] }),
+      // Default fetchPaypalSummary (from startTestServer) throws "No subscription found."
+    });
+    try {
+      const response = await fetch(`${ctx.baseUrl}/api/budget/ask`, {
+        method: "POST",
+        headers: ctx.sameOrigin,
+        body: JSON.stringify({ text: "What if I resume StreamBox?" }),
+      });
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      // Unavailable PayPal data has no serviceName to confirm "StreamBox"
+      // against, so this is a rejection, not a fabricated answer.
+      assert.equal(body.type, "rejected");
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  test("a tracked trial sharing the sandbox's name is rejected as not-a-subscription", async () => {
+    const ctx = await startWithPausedSandbox(
+      stubConversationClient({ intent: "hypothetical_resumption", serviceNames: ["DesignNest Demo"] })
+    );
+    try {
+      await ctx.createTrial({ serviceName: "DesignNest Demo" });
+      const response = await fetch(`${ctx.baseUrl}/api/budget/ask`, {
+        method: "POST",
+        headers: ctx.sameOrigin,
+        body: JSON.stringify({ text: "What if I resume DesignNest Demo?" }),
+      });
+      const body = await response.json();
+      assert.equal(body.type, "rejected");
+      assert.ok(body.answer.body.some((line) => line.includes("nothing to resume")));
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  test("an actual 'resume StreamBox' command is refused and makes no mutation call", async () => {
+    // startTestServer wires pauseSubscription/resumeSubscription stubs that
+    // THROW if ever invoked (see startTestServer above) — a 500 here would
+    // mean this hypothetical path accidentally called a real mutation.
+    const ctx = await startWithPausedSandbox(stubConversationClient({ intent: "unsupported", serviceNames: [] }));
+    try {
+      const response = await fetch(`${ctx.baseUrl}/api/budget/ask`, {
+        method: "POST",
+        headers: ctx.sameOrigin,
+        body: JSON.stringify({ text: "Resume StreamBox now." }),
+      });
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.type, "answer");
+      assert.ok(body.answer.body.some((line) => line.includes("can't cancel, pause, or edit")));
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  test("hypothetical resumption questions make no mutation call even on the success path", async () => {
+    const ctx = await startWithPausedSandbox(
+      stubConversationClient({ intent: "hypothetical_resumption", serviceNames: ["StreamBox"] })
+    );
+    try {
+      const response = await fetch(`${ctx.baseUrl}/api/budget/ask`, {
+        method: "POST",
+        headers: ctx.sameOrigin,
+        body: JSON.stringify({ text: "What happens if I unpause StreamBox?" }),
+      });
+      // If this had called the pauseSubscription/resumeSubscription stubs
+      // (which throw), the handler's catch-all would have returned a
+      // non-200 status instead.
+      assert.equal(response.status, 200);
+    } finally {
+      await ctx.close();
+    }
+  });
+});
+
 describe("sandbox separation end-to-end", () => {
   test("an ACTIVE PayPal sandbox subscription never contributes to the tracked total", async () => {
     const ctx = await startTestServer({

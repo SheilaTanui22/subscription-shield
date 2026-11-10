@@ -62,6 +62,32 @@ export function categorizeTrials(trials, now = new Date()) {
   return trials.map((trial) => categorizeTrial(trial, todayKey));
 }
 
+// Normalizes a plan's recurring-price block (available from PayPal's plan
+// endpoint regardless of the subscription's own status — see
+// buildRecurringPrice in subscription-service.mjs) into the shape callers
+// need. Returns null when no price was reported at all. This is what lets
+// a paused subscription still state its verified price/currency/billing
+// frequency — the plan terms don't disappear just because billing is
+// currently suspended.
+function normalizedPlanTerms(recurringPrice) {
+  if (!recurringPrice) return null;
+
+  const priceCents = Math.round(Number(recurringPrice.value) * 100);
+  const unit = recurringPrice.intervalUnit?.toUpperCase();
+  const billingFrequency = unit === "YEAR" ? "yearly" : unit === "MONTH" ? "monthly" : null;
+  const monthlyEquivalentCents =
+    unit === "YEAR" ? Math.round(priceCents / (12 * (recurringPrice.intervalCount || 1))) : priceCents;
+
+  return {
+    renewalPriceCents: priceCents,
+    currency: recurringPrice.currencyCode ?? null,
+    billingFrequency,
+    intervalUnit: recurringPrice.intervalUnit ?? null,
+    intervalCount: recurringPrice.intervalCount ?? null,
+    monthlyEquivalentCents,
+  };
+}
+
 // Classifies the one PayPal sandbox subscription this demo tracks into
 // exactly one category, from either a fetched summary or a fetch error.
 // ACTIVE is "verified" by PayPal's own status field, but that is still
@@ -78,27 +104,22 @@ export function categorizePaypalSubscription({ summary, error } = {}) {
   }
 
   const serviceName = (summary.planName ?? "StreamBox").split(":")[0].trim();
+  const planTerms = normalizedPlanTerms(summary.recurringPrice);
 
   if (summary.status === "ACTIVE") {
-    const price = summary.recurringPrice;
-    if (!price) {
+    if (!planTerms) {
       return { category: "unknown", serviceName, status: summary.status, reason: "No recurring price reported." };
     }
-    const priceCents = Math.round(Number(price.value) * 100);
-    const unit = price.intervalUnit?.toUpperCase();
-    const monthlyEquivCents =
-      unit === "YEAR" ? Math.round(priceCents / (12 * (price.intervalCount || 1))) : priceCents;
-    return {
-      category: "active",
-      serviceName,
-      status: summary.status,
-      renewalPriceCents: priceCents,
-      monthlyEquivalentCents: monthlyEquivCents,
-    };
+    return { category: "active", serviceName, status: summary.status, ...planTerms };
   }
 
+  // Paused (or any other) status still carries the plan's verified price,
+  // currency, and billing frequency when PayPal reports one — a
+  // subscription being paused doesn't erase its own plan terms, so a
+  // hypothetical "what if I resume this?" answer can state them honestly
+  // instead of going silent on the one thing it could actually confirm.
   if (summary.status === "SUSPENDED") {
-    return { category: "paused", serviceName, status: summary.status };
+    return { category: "paused", serviceName, status: summary.status, ...(planTerms ?? {}) };
   }
 
   return {
@@ -106,6 +127,7 @@ export function categorizePaypalSubscription({ summary, error } = {}) {
     serviceName,
     status: summary.status,
     reason: `PayPal reported status "${summary.status}", which this app does not treat as active or paused.`,
+    ...(planTerms ?? {}),
   };
 }
 

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   interpretQuestion,
   resolveServiceNames,
+  resolveResumptionName,
   interpretAndResolve,
   MAX_QUESTION_LENGTH,
 } from "../lib/budget-conversation.mjs";
@@ -60,6 +61,24 @@ describe("interpretQuestion", () => {
     const client = stubClient({ intent: "delete_my_account", serviceNames: [] });
     const result = await interpretQuestion(client, "please help");
     assert.equal(result.intent, "unsupported");
+  });
+
+  test("passes through negated:true for hypothetical_resumption", async () => {
+    const client = stubClient({ intent: "hypothetical_resumption", serviceNames: ["StreamBox"], negated: true });
+    const result = await interpretQuestion(client, "What if I don't unpause StreamBox?");
+    assert.equal(result.negated, true);
+  });
+
+  test("defaults negated to false when the model omits it", async () => {
+    const client = stubClient({ intent: "hypothetical_resumption", serviceNames: ["StreamBox"] });
+    const result = await interpretQuestion(client, "What if I unpause StreamBox?");
+    assert.equal(result.negated, false);
+  });
+
+  test("ignores a stray negated:true for any intent other than hypothetical_resumption", async () => {
+    const client = stubClient({ intent: "hypothetical_exclusion", serviceNames: ["DesignNest Demo"], negated: true });
+    const result = await interpretQuestion(client, "What if I don't renew DesignNest Demo?");
+    assert.equal(result.negated, false);
   });
 
   test("drops a service name the model invented that never appears in the question (trust-but-verify)", async () => {
@@ -135,6 +154,55 @@ describe("resolveServiceNames", () => {
   });
 });
 
+describe("resolveResumptionName", () => {
+  const trials = [trial({ id: "a", serviceName: "DesignNest Demo" })];
+  const pausedSandbox = { category: "paused", serviceName: "StreamBox" };
+
+  test("no service name given -> no_name", () => {
+    assert.deepEqual(resolveResumptionName([], trials, pausedSandbox), { type: "no_name" });
+  });
+
+  test("resolves the sandbox subscription by name, case-insensitively", () => {
+    const result = resolveResumptionName(["streambox"], trials, pausedSandbox);
+    assert.equal(result.type, "resolved");
+    assert.equal(result.name, "streambox");
+  });
+
+  test("a name matching only a tracked trial is not_a_subscription (trials have no resume state)", () => {
+    const result = resolveResumptionName(["DesignNest Demo"], trials, pausedSandbox);
+    assert.equal(result.type, "not_a_subscription");
+  });
+
+  test("a name matching neither the sandbox nor a trial is not_found", () => {
+    const result = resolveResumptionName(["Ghost Service"], trials, pausedSandbox);
+    assert.equal(result.type, "not_found");
+    assert.equal(result.name, "Ghost Service");
+  });
+
+  test("more than one distinct name mentioned is ambiguous (multiple_names)", () => {
+    const result = resolveResumptionName(["StreamBox", "DesignNest Demo"], trials, pausedSandbox);
+    assert.equal(result.type, "multiple_names");
+  });
+
+  test("a trial sharing the sandbox's exact name is a name_collision, not silently resolved", () => {
+    const collidingTrials = [trial({ id: "a", serviceName: "StreamBox" })];
+    const result = resolveResumptionName(["StreamBox"], collidingTrials, pausedSandbox);
+    assert.equal(result.type, "name_collision");
+  });
+
+  test("works the same regardless of the sandbox's current category (active/unknown/unavailable)", () => {
+    for (const sandbox of [
+      { category: "active", serviceName: "StreamBox" },
+      { category: "unknown", serviceName: "StreamBox", status: "EXPIRED" },
+      { category: "unavailable", reason: "x" },
+    ]) {
+      const result = resolveResumptionName(["StreamBox"], trials, sandbox);
+      // "unavailable" has no serviceName to match against at all.
+      assert.equal(result.type, sandbox.category === "unavailable" ? "not_found" : "resolved");
+    }
+  });
+});
+
 describe("interpretAndResolve", () => {
   const trials = [trial({ id: "a", serviceName: "DesignNest Demo" })];
   const sandbox = { category: "active", serviceName: "StreamBox" };
@@ -194,5 +262,151 @@ describe("interpretAndResolve", () => {
     });
     assert.equal(result.type, "resolved");
     assert.deepEqual([...result.excludeTrialIds].sort(), ["a", "existing-other-id"].sort());
+  });
+});
+
+// Regression coverage for the reported bug: with StreamBox paused, these
+// questions were both wrongly classified as hypothetical_exclusion and
+// produced the generic "already paused, already excluded" answer instead
+// of a resumption-specific one. The AI classification itself is mocked
+// here (interpretAndResolve's job starts from an already-classified
+// intent) — see the live-Ollama verification notes for whether the real
+// model actually classifies these two exact questions correctly.
+describe("interpretAndResolve: hypothetical_resumption", () => {
+  const trials = [trial({ id: "a", serviceName: "DesignNest Demo" })];
+  const pausedSandbox = { category: "paused", serviceName: "StreamBox" };
+
+  test('reported question 1: "What happens if I unpause StreamBox?"', async () => {
+    const client = stubClient({ intent: "hypothetical_resumption", serviceNames: ["StreamBox"], negated: false });
+    const result = await interpretAndResolve({
+      client,
+      text: "What happens if I unpause StreamBox?",
+      trials,
+      paypalSandbox: pausedSandbox,
+    });
+    assert.equal(result.type, "resolved");
+    assert.equal(result.intent, "hypothetical_resumption");
+    assert.equal(result.negated, false);
+    // Never touches trial exclusion state — this intent has nothing to do
+    // with renewal exclusion.
+    assert.deepEqual(result.excludeTrialIds, []);
+  });
+
+  test('reported question 2: "What happens if I add StreamBox back?"', async () => {
+    const client = stubClient({ intent: "hypothetical_resumption", serviceNames: ["StreamBox"] });
+    const result = await interpretAndResolve({
+      client,
+      text: "What happens if I add StreamBox back?",
+      trials,
+      paypalSandbox: pausedSandbox,
+    });
+    assert.equal(result.type, "resolved");
+    assert.equal(result.intent, "hypothetical_resumption");
+  });
+
+  test("paraphrase: \"What if I reactivate StreamBox?\"", async () => {
+    const client = stubClient({ intent: "hypothetical_resumption", serviceNames: ["StreamBox"] });
+    const result = await interpretAndResolve({
+      client,
+      text: "What if I reactivate StreamBox?",
+      trials,
+      paypalSandbox: pausedSandbox,
+    });
+    assert.equal(result.type, "resolved");
+  });
+
+  test("paraphrase: \"What would happen if I turned StreamBox back on?\"", async () => {
+    const client = stubClient({ intent: "hypothetical_resumption", serviceNames: ["StreamBox"] });
+    const result = await interpretAndResolve({
+      client,
+      text: "What would happen if I turned StreamBox back on?",
+      trials,
+      paypalSandbox: pausedSandbox,
+    });
+    assert.equal(result.type, "resolved");
+  });
+
+  test("negation: \"What if I don't unpause StreamBox?\" still resolves to the resumption flow, with negated:true", async () => {
+    const client = stubClient({ intent: "hypothetical_resumption", serviceNames: ["StreamBox"], negated: true });
+    const result = await interpretAndResolve({
+      client,
+      text: "What if I don't unpause StreamBox?",
+      trials,
+      paypalSandbox: pausedSandbox,
+    });
+    assert.equal(result.type, "resolved");
+    assert.equal(result.intent, "hypothetical_resumption");
+    assert.equal(result.negated, true);
+  });
+
+  test("an actual imperative command (not hypothetical) is classified unsupported, not resumption", async () => {
+    const client = stubClient({ intent: "unsupported", serviceNames: [] });
+    const result = await interpretAndResolve({
+      client,
+      text: "Resume StreamBox now.",
+      trials,
+      paypalSandbox: pausedSandbox,
+    });
+    assert.equal(result.type, "unsupported");
+  });
+
+  test("already-active subscription still resolves (category doesn't block resolution)", async () => {
+    const client = stubClient({ intent: "hypothetical_resumption", serviceNames: ["StreamBox"] });
+    const result = await interpretAndResolve({
+      client,
+      text: "What if I resume StreamBox?",
+      trials,
+      paypalSandbox: { category: "active", serviceName: "StreamBox" },
+    });
+    assert.equal(result.type, "resolved");
+  });
+
+  test("an unknown/invented subscription name is rejected with reason not_found", async () => {
+    const client = stubClient({ intent: "hypothetical_resumption", serviceNames: ["Ghost Service"] });
+    const result = await interpretAndResolve({
+      client,
+      text: "What if I resume Ghost Service?",
+      trials,
+      paypalSandbox: pausedSandbox,
+    });
+    assert.equal(result.type, "rejected");
+    assert.equal(result.reason, "not_found");
+    assert.equal(result.name, "Ghost Service");
+  });
+
+  test("unavailable PayPal data: the name can't be confirmed, rejected rather than guessed", async () => {
+    const client = stubClient({ intent: "hypothetical_resumption", serviceNames: ["StreamBox"] });
+    const result = await interpretAndResolve({
+      client,
+      text: "What if I resume StreamBox?",
+      trials,
+      paypalSandbox: { category: "unavailable", reason: "No subscription found." },
+    });
+    assert.equal(result.type, "rejected");
+    assert.equal(result.reason, "not_found");
+  });
+
+  test("no name given is rejected, not silently assumed", async () => {
+    const client = stubClient({ intent: "hypothetical_resumption", serviceNames: [] });
+    const result = await interpretAndResolve({
+      client,
+      text: "What if I resume it?",
+      trials,
+      paypalSandbox: pausedSandbox,
+    });
+    assert.equal(result.type, "rejected");
+    assert.equal(result.reason, "no_name");
+  });
+
+  test("a name matching a tracked trial (not the sandbox) is rejected as not_a_subscription", async () => {
+    const client = stubClient({ intent: "hypothetical_resumption", serviceNames: ["DesignNest Demo"] });
+    const result = await interpretAndResolve({
+      client,
+      text: "What if I resume DesignNest Demo?",
+      trials,
+      paypalSandbox: pausedSandbox,
+    });
+    assert.equal(result.type, "rejected");
+    assert.equal(result.reason, "not_a_subscription");
   });
 });

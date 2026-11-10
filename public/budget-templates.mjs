@@ -203,6 +203,126 @@ function totalMonthlyEquivalentCentsOf(items) {
   return items.reduce((sum, item) => sum + item.monthlyEquivalentCents, 0);
 }
 
+function planTermsLabel(sandbox) {
+  if (sandbox.renewalPriceCents == null) return null;
+  const amount = formatUsd(sandbox.renewalPriceCents);
+  if (sandbox.billingFrequency === "yearly") return `${amount}/year`;
+  if (sandbox.billingFrequency === "monthly") return `${amount}/month`;
+  if (sandbox.intervalCount && sandbox.intervalUnit) {
+    const unit = sandbox.intervalUnit.toLowerCase();
+    return `${amount} every ${sandbox.intervalCount} ${unit}${sandbox.intervalCount > 1 ? "s" : ""}`;
+  }
+  return amount;
+}
+
+// A "what if I resume/unpause/add X back" question — or its negation,
+// "what if I DON'T resume/unpause X" (`negated: true`). Distinct from
+// hypothetical_exclusion (which is about NOT renewing a tracked trial) —
+// this is only ever about the one sandbox PayPal subscription, since
+// trials have no active/paused state to resume.
+//
+// It never invents a next charge date, an immediate charge, or a savings
+// figure. The "next charge date can't currently be confirmed" claim is
+// deliberately NOT attributed to this app's own `nextBillingTime: null`
+// suppression for non-active subscriptions (see subscription-service.mjs)
+// — that's an internal display choice, not evidence of what PayPal itself
+// reports. It's phrased as PayPal's own behavior only because that was
+// independently verified against the raw PayPal API response for a
+// SUSPENDED subscription (billing_info has no next_billing_time key at
+// all while suspended, not just a null value) — if that ever needs
+// re-checking, fall back to the safer "can't currently be confirmed"
+// framing alone.
+export function hypotheticalResumptionAnswer(summary, { negated = false } = {}) {
+  const sandbox = summary.paypalSandbox;
+  const name = sandbox.serviceName ?? "your PayPal sandbox subscription";
+  const terms = planTermsLabel(sandbox);
+  const body = [];
+
+  if (sandbox.category === "paused") {
+    body.push(`"${name}" is currently paused.`);
+
+    if (negated) {
+      body.push(
+        "If you don't resume it, it stays paused and billing remains stopped — nothing changes unless it's explicitly resumed."
+      );
+      if (terms) {
+        body.push(
+          `For reference, its last verified plan terms were ${terms} (${sandbox.currency ?? "USD"}) — sandbox/demo data, never part of your tracked potential-renewal total.`
+        );
+      }
+      body.push("No subscription was changed — this is a hypothetical comparison only.");
+    } else {
+      body.push(
+        terms
+          ? `Resuming it would restore billing at its last verified plan terms: ${terms} (${sandbox.currency ?? "USD"}). This is sandbox/demo data — never added to your tracked potential-renewal total.`
+          : "Its plan price, currency, and billing frequency could not be verified, so this can't describe exact billing terms."
+      );
+      body.push(
+        "The next charge date can't currently be confirmed: PayPal's own subscription data doesn't include a next billing date while a subscription is paused — this would not be an immediate charge."
+      );
+      body.push("No subscription was changed — this is a hypothetical comparison only.");
+      body.push("To actually resume it, use the existing Resume subscription control on the dashboard.");
+    }
+  } else if (sandbox.category === "active") {
+    body.push(
+      negated
+        ? `"${name}" is already active, not paused — there's nothing being left paused here, so this question doesn't change anything.`
+        : `"${name}" is already active — there's nothing to resume or unpause right now.`
+    );
+    if (terms) {
+      body.push(`It's currently billing at ${terms} (${sandbox.currency ?? "USD"}), sandbox/demo data only.`);
+    }
+    body.push("No subscription was changed.");
+  } else if (sandbox.category === "unknown") {
+    body.push(
+      `"${name}" reported an unrecognized status ("${sandbox.status}"), so whether it would stay paused or resume — and its billing timing — can't be confirmed from here.`
+    );
+    body.push("No subscription was changed.");
+  } else {
+    body.push(
+      `PayPal sandbox subscription data is currently unavailable (${sandbox.reason}), so this scenario — and its billing timing — can't be confirmed right now.`
+    );
+    body.push("No subscription was changed.");
+  }
+
+  return {
+    headline: negated ? `Hypothetical: what if you don't resume ${name}?` : `Hypothetical: what if you resume ${name}?`,
+    body,
+    // Deliberately empty: this question is solely about the sandbox
+    // subscription, never about tracked trial records.
+    includedRecords: [],
+    excludedRecords: [],
+  };
+}
+
+const RESUMPTION_REJECTION_BODY = {
+  no_name: ["Name which subscription you mean (e.g. \"What if I resume StreamBox?\")."],
+  multiple_names: ["More than one name was mentioned — ask about resuming one subscription at a time."],
+};
+
+export function hypotheticalResumptionRejectedAnswer(reason, { name } = {}) {
+  const body =
+    RESUMPTION_REJECTION_BODY[reason] ??
+    (reason === "not_found"
+      ? [`No tracked subscription was found named "${name}". Check the spelling — this app only tracks one PayPal sandbox subscription.`]
+      : reason === "not_a_subscription"
+        ? [
+            `"${name}" is a tracked trial, not a subscription with an active/paused status — there's nothing to resume or unpause. Only the PayPal sandbox subscription has that state.`,
+          ]
+        : reason === "name_collision"
+          ? [
+              `Both a tracked trial and the PayPal sandbox subscription are named "${name}". Resuming only applies to the PayPal sandbox subscription — ask again if that's what you meant.`,
+            ]
+          : ["Could not determine which subscription you meant."]);
+
+  return {
+    headline: "I couldn't match that to a resumable subscription",
+    body,
+    includedRecords: [],
+    excludedRecords: [],
+  };
+}
+
 // Covers two cases the model can't reliably tell apart (and doesn't need
 // to — both get the same honest answer): a request to actually cancel or
 // pause something, and any other question outside the 4 supported intents.
