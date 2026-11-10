@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Subscription Shield</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <header class="site-header">
+      <div class="brand">
+        <span class="brand-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2 4 5v6c0 5 3.4 8.7 8 10 4.6-1.3 8-5 8-10V5z" />
+            <path d="m9 12 2 2 4-4" />
+          </svg>
+        </span>
+        <span class="brand-name">Subscription Shield</span>
+        <span class="badge badge-sandbox">Sandbox demo</span>
+      </div>
+
+      <button id="refresh-button" type="button" class="btn btn-ghost">
+        <span id="refresh-icon" class="icon icon-refresh" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 12a9 9 0 0 1 15.4-6.4L21 8" />
+            <path d="M21 3v5h-5" />
+            <path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" />
+            <path d="M3 21v-5h5" />
+          </svg>
+        </span>
+        <span>Refresh</span>
+      </button>
+    </header>
+
+    <main class="page">
+      <section class="intro">
+        <h1>Your subscriptions, under control.</h1>
+        <p>Keep track of trials, renewals, and what you pay.</p>
+      </section>
+
+      <section class="summary-row" aria-label="Subscription summary">
+        <div class="summary-tile">
+          <span class="summary-value" id="summary-tracked">—</span>
+          <span class="summary-label">Tracked</span>
+        </div>
+        <div class="summary-tile">
+          <span class="summary-value" id="summary-active">—</span>
+          <span class="summary-label">Active</span>
+        </div>
+        <div class="summary-tile">
+          <span class="summary-value" id="summary-paused">—</span>
+          <span class="summary-label">Paused</span>
+        </div>
+      </section>
+
+      <section id="app" aria-live="polite" aria-atomic="true"></section>
+
+      <section class="panel" aria-labelledby="deadlines-heading">
+        <div class="panel-header">
+          <h2 id="deadlines-heading">
+            <span class="icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+              </svg>
+            </span>
+            Upcoming trial deadlines
+          </h2>
+          <p class="panel-note">
+            In-app alerts only, visible while this dashboard is open. They don't send email, push, or background notifications.
+          </p>
+        </div>
+        <div id="deadlines-list" aria-live="polite" aria-atomic="true"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="trials-heading">
+        <div class="panel-header panel-header-split">
+          <div>
+            <h2 id="trials-heading">Free trials</h2>
+            <p class="panel-note">
+              Trials you add yourself. These track dates you enter — they're not connected to the provider and don't cancel billing automatically.
+            </p>
+          </div>
+          <div class="header-actions">
+            <button id="import-trial-button" type="button" class="btn btn-outline">
+              <span class="icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 3v12" />
+                  <path d="m7 10 5 5 5-5" />
+                  <path d="M4 20h16" />
+                </svg>
+              </span>
+              <span>Import from text</span>
+            </button>
+            <button id="add-trial-button" type="button" class="btn btn-primary">
+              <span class="icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </span>
+              <span>Add free trial</span>
+            </button>
+          </div>
+        </div>
+        <div id="trials-list" aria-live="polite" aria-atomic="true"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="budget-heading">
+        <div class="panel-header">
+          <h2 id="budget-heading">
+            <span class="icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2.5" y="6" width="19" height="13" rx="2" />
+                <path d="M2.5 10h19" />
+                <path d="M6 15h3" />
+              </svg>
+            </span>
+            Budget conversation
+          </h2>
+          <p class="panel-note">
+            Set a monthly budget and compare it with your tracked trial renewals. Everything here is calculated
+            locally — amounts are planned/potential costs, not a record of your actual bank spending, and sandbox
+            PayPal demo amounts are never mixed into these totals.
+          </p>
+        </div>
+
+        <div class="budget-editor">
+          <div class="field budget-amount-field">
+            <label for="budget-amount">Monthly budget (USD)</label>
+            <div class="budget-editor-row">
+              <div class="price-input">
+                <span class="price-prefix" aria-hidden="true">$</span>
+                <input id="budget-amount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="Not set" />
+              </div>
+              <button id="budget-save-button" type="button" class="btn btn-primary">Save budget</button>
+              <button id="budget-clear-button" type="button" class="btn btn-outline">Unset</button>
+            </div>
+            <p class="field-error" id="budget-save-error" role="alert"></p>
+          </div>
+        </div>
+
+        <div class="budget-summary-row" id="budget-summary-row" aria-live="polite" aria-atomic="true">
+          <div class="summary-tile">
+            <span class="summary-value" id="budget-summary-budget">—</span>
+            <span class="summary-label">Monthly budget</span>
+          </div>
+          <div class="summary-tile">
+            <span class="summary-value" id="budget-summary-tracked">—</span>
+            <span class="summary-label">Tracked potential cost</span>
+          </div>
+          <div class="summary-tile">
+            <span class="summary-value" id="budget-summary-diff">—</span>
+            <span class="summary-label" id="budget-summary-diff-label">Difference</span>
+          </div>
+        </div>
+        <p class="field-note" id="budget-sandbox-note"></p>
+
+        <div class="budget-conversation">
+          <p class="panel-note" id="budget-scenario-note" hidden></p>
+
+          <div class="budget-suggested-questions" id="budget-suggested-questions">
+            <button type="button" class="btn btn-outline btn-small" data-intent="compare_renewals_to_budget">
+              How do my tracked subscriptions compare with my budget?
+            </button>
+            <button type="button" class="btn btn-outline btn-small" data-intent="rank_renewals">
+              Which potential renewals cost the most?
+            </button>
+            <button type="button" class="btn btn-outline btn-small" data-ask-example="What if I don't renew DesignNest Demo?">
+              What if I don't renew DesignNest Demo?
+            </button>
+          </div>
+
+          <form id="budget-ask-form" class="budget-ask-form field">
+            <label for="budget-ask-input">Ask a question about your tracked subscriptions</label>
+            <div class="budget-ask-row">
+              <input
+                id="budget-ask-input"
+                type="text"
+                maxlength="500"
+                placeholder="e.g. What if I don't renew DesignNest Demo?"
+                autocomplete="off"
+              />
+              <button id="budget-ask-button" type="submit" class="btn btn-primary">Ask</button>
+            </div>
+            <p class="field-note" id="budget-ask-note">
+              Suggested questions above are calculated summaries — no AI call is made for them. Free-text questions
+              use the local Ollama model only to figure out what you're asking; every number in the answer is
+              still calculated in code.
+            </p>
+          </form>
+
+          <div id="budget-answer" aria-live="polite" aria-atomic="true"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="banner" class="banner" hidden role="status" aria-live="polite"></div>
+
+  <dialog id="trial-dialog" class="trial-dialog" aria-labelledby="trial-dialog-title">
+    <form id="trial-form" novalidate>
+      <div class="dialog-header">
+        <h2 id="trial-dialog-title">Add free trial</h2>
+        <button type="button" class="icon-button" data-action="close" aria-label="Close dialog">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m6 6 12 12M18 6 6 18" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="form-step" data-step="form">
+        <div id="import-context" class="import-context" hidden>
+          <p class="import-context-title">Imported from text — review every field before saving.</p>
+          <ul id="import-warnings" class="import-warnings"></ul>
+        </div>
+
+        <div class="field">
+          <label for="trial-service-name">Service name</label>
+          <input id="trial-service-name" name="serviceName" type="text" maxlength="100" required autocomplete="off" aria-describedby="error-serviceName note-serviceName" />
+          <p class="field-note" id="note-serviceName"></p>
+          <p class="field-error" id="error-serviceName" role="alert"></p>
+        </div>
+
+        <div class="field">
+          <label for="trial-end-date">Trial end date</label>
+          <input id="trial-end-date" name="trialEndDate" type="date" required aria-describedby="error-trialEndDate note-trialEndDate" />
+          <p class="field-note" id="note-trialEndDate"></p>
+          <p class="field-error" id="error-trialEndDate" role="alert"></p>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="trial-price">Renewal price</label>
+            <div class="price-input">
+              <span class="price-prefix" aria-hidden="true">$</span>
+              <input id="trial-price" name="renewalPrice" type="number" min="0" step="0.01" inputmode="decimal" required aria-describedby="error-renewalPrice note-renewalPrice" />
+            </div>
+            <p class="field-note" id="note-renewalPrice"></p>
+            <p class="field-error" id="error-renewalPrice" role="alert"></p>
+          </div>
+          <div class="field">
+            <label for="trial-currency">Currency</label>
+            <select id="trial-currency" name="currency">
+              <option value="USD">USD</option>
+            </select>
+            <p class="field-note" id="note-currency"></p>
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="trial-frequency">Billing frequency</label>
+            <select id="trial-frequency" name="billingFrequency" required>
+              <option value="monthly">Monthly</option>
+              <option value="yearly">Yearly</option>
+            </select>
+            <p class="field-note" id="note-billingFrequency"></p>
+          </div>
+          <div class="field">
+            <label for="trial-reminder">Remind me</label>
+            <select id="trial-reminder" name="reminderLeadDays">
+              <option value="1">1 day before</option>
+              <option value="3" selected>3 days before</option>
+              <option value="7">7 days before</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-outline" data-action="cancel">Cancel</button>
+          <button type="button" class="btn btn-primary" data-action="review">Review</button>
+        </div>
+      </div>
+
+      <div class="form-step" data-step="review" hidden>
+        <p class="review-intro">Check these details before saving.</p>
+        <dl class="review-list" id="review-list"></dl>
+        <p class="field-note field-note-warning" id="review-duplicate-warning" role="status"></p>
+        <p class="field-error" id="trial-save-error" role="alert"></p>
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-outline" data-action="back">Back to edit</button>
+          <button type="button" class="btn btn-primary" data-action="save">Save trial</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="import-dialog" class="trial-dialog" aria-labelledby="import-dialog-title">
+    <div class="dialog-header">
+      <h2 id="import-dialog-title">Import from text</h2>
+      <button type="button" class="icon-button" data-action="import-close" aria-label="Close dialog">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="m6 6 12 12M18 6 6 18" />
+        </svg>
+      </button>
+    </div>
+
+    <p class="import-privacy-note">
+      Paste a trial confirmation message below (e.g. an email or receipt).
+      <span id="import-privacy-detail">Extraction runs locally on this computer using Ollama — nothing is sent to a cloud AI provider.</span>
+      Please remove passwords, card numbers, or other sensitive information first. The raw text is not saved or
+      logged; only the details you confirm below are stored.
+    </p>
+
+    <div class="field">
+      <label for="import-text">Pasted confirmation text</label>
+      <textarea id="import-text" rows="8" maxlength="10000" aria-describedby="import-text-count error-import"></textarea>
+      <div class="import-text-meta">
+        <span id="import-text-count">0 / 10,000 characters</span>
+      </div>
+      <p class="field-error" id="error-import" role="alert"></p>
+    </div>
+
+    <div id="import-status" aria-live="polite"></div>
+
+    <div class="dialog-actions">
+      <button type="button" class="btn btn-outline" data-action="import-cancel">Cancel</button>
+      <button type="button" class="btn btn-primary" id="extract-button" data-action="extract">
+        <span id="extract-spinner" class="icon icon-refresh" aria-hidden="true" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 12a9 9 0 0 1 15.4-6.4L21 8" />
+            <path d="M21 3v5h-5" />
+            <path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" />
+            <path d="M3 21v-5h5" />
+          </svg>
+        </span>
+        <span id="extract-label">Extract details</span>
+      </button>
+    </div>
+  </dialog>
+
+  <dialog id="calendar-dialog" class="trial-dialog" aria-labelledby="calendar-dialog-title">
+    <div class="dialog-header">
+      <h2 id="calendar-dialog-title">Add to calendar</h2>
+      <button type="button" class="icon-button" data-action="calendar-close" aria-label="Close dialog">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="m6 6 12 12M18 6 6 18" />
+        </svg>
+      </button>
+    </div>
+
+    <div class="calendar-summary">
+      <span class="calendar-summary-name" id="calendar-service-name"></span>
+      <span class="calendar-summary-end" id="calendar-end-date"></span>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label for="calendar-reminder-date">Reminder date</label>
+        <input id="calendar-reminder-date" type="date" required />
+      </div>
+      <div class="field">
+        <label for="calendar-reminder-time">Reminder time</label>
+        <input id="calendar-reminder-time" type="time" required />
+      </div>
+    </div>
+
+    <p class="field-note" id="calendar-timezone-note"></p>
+    <p class="field-error" id="calendar-past-warning" role="alert"></p>
+
+    <div class="import-privacy-note">
+      Downloading does not mean a reminder has been scheduled anywhere. Import the downloaded file into your
+      calendar app, then check that event's notification settings there — this file only carries one suggested
+      alert, which your calendar app may handle differently.
+      <br /><br />
+      This is a one-time snapshot: editing or deleting this trial afterward will not update or remove the
+      calendar event, and downloading again will likely create a duplicate rather than replace it.
+      <br /><br />
+      This is separate from the in-app "Upcoming trial deadlines" alerts above, which only appear while this
+      dashboard is open in your browser.
+    </div>
+
+    <div class="dialog-actions">
+      <button type="button" class="btn btn-outline" data-action="calendar-cancel">Cancel</button>
+      <button type="button" class="btn btn-primary" id="calendar-download-button">Download .ics</button>
+    </div>
+  </dialog>
+
+  <script type="module" src="/app.mjs"></script>
+</body>
+</html>

@@ -4,3 +4,7 @@ node_modules/
 !.env.example
 
 demo-state.json
+trials.json
+trials.json.*.tmp
+budget.json
+budget.json.*.tmp

@@ -1,0 +1,15 @@
+{
+  "name": "subscription-shield",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Track free-trial renewals and a PayPal sandbox subscription, with a local-AI-assisted budget conversation.",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node --env-file=.env server.mjs",
+    "test": "node --test"
+  },
+  "keywords": [],
+  "author": "Sheila Jemeli Tanui",
+  "license": "MIT",
+  "type": "commonjs"
+}

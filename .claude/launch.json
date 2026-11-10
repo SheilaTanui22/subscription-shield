@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "subscription-shield",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--env-file=.env", "server.mjs"],
+      "port": 3001
+    }
+  ]
+}
