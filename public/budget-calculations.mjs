@@ -88,7 +88,7 @@ function normalizedPlanTerms(recurringPrice) {
   };
 }
 
-// Classifies the one PayPal sandbox subscription this demo tracks into
+// Classifies a PayPal sandbox subscription this demo tracks into
 // exactly one category, from either a fetched summary or a fetch error.
 // ACTIVE is "verified" by PayPal's own status field, but that is still
 // never treated as proof of a completed charge — see the "sandbox" label
@@ -97,13 +97,13 @@ function normalizedPlanTerms(recurringPrice) {
 // unreachable, etc.) becomes "unavailable" with a reason, never silently 0.
 export function categorizePaypalSubscription({ summary, error } = {}) {
   if (error) {
-    return { category: "unavailable", reason: error.message };
+    return { category: "unavailable", reason: typeof error === "string" ? error : error.message };
   }
   if (!summary) {
     return { category: "unavailable", reason: "No subscription data was loaded." };
   }
 
-  const serviceName = (summary.planName ?? "StreamBox").split(":")[0].trim();
+  const serviceName = (summary.planName ?? summary.serviceName ?? "StreamBox").split(":")[0].trim();
   const planTerms = normalizedPlanTerms(summary.recurringPrice);
 
   if (summary.status === "ACTIVE") {
@@ -157,7 +157,12 @@ export function buildBudgetSummary({ budget, trials, paypal, excludeTrialIds = [
   const excludedItems = allItems.filter((item) => excluded.has(item.id));
 
   const totalCents = totalMonthlyEquivalentCents(includedItems);
-  const paypalSandbox = categorizePaypalSubscription(paypal ?? {});
+  const paypalSandboxes = paypal?.entries?.map((entry) => ({
+    subscriptionId: entry.subscriptionId,
+    serviceName: entry.serviceName,
+    ...categorizePaypalSubscription(entry),
+  }));
+  const paypalSandbox = paypalSandboxes?.[0] ?? categorizePaypalSubscription(paypal ?? {});
 
   return {
     budget: { amountCents: budget?.amountCents ?? null, currency: budget?.currency ?? "USD" },
@@ -167,6 +172,7 @@ export function buildBudgetSummary({ budget, trials, paypal, excludeTrialIds = [
       excludedItems,
     },
     paypalSandbox,
+    ...(paypalSandboxes ? { paypalSandboxes } : {}),
     comparison: budgetComparison(budget?.amountCents ?? null, totalCents),
   };
 }

@@ -536,7 +536,7 @@ describe("POST /api/budget/ask: hypothetical resumption (regression)", () => {
       assert.deepEqual(body.answer.body, [
         '"StreamBox" is currently paused.',
         "Resuming it would restore billing at its last verified plan terms: $12.00/month (USD). This is sandbox/demo data — never added to your tracked potential-renewal total.",
-        "The next charge date can't currently be confirmed — PayPal's own data for this subscription doesn't currently include a next billing date.",
+        "The next charge date can't currently be confirmed for this subscription.",
         "No subscription was changed — this is a hypothetical comparison only.",
         "To actually resume it, use the existing Resume subscription control on the dashboard.",
       ]);

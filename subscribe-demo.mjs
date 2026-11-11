@@ -1,9 +1,11 @@
 import http from "node:http";
 import { readFile, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { demoConfiguration } from "./lib/demo-config.mjs";
 
 const base = process.env.PAYPAL_BASE_URL;
-const stateFile = new URL("./demo-state.json", import.meta.url);
+const demo = demoConfiguration(process.argv.slice(2));
+const stateFile = new URL(`./${demo.fileName}`, import.meta.url);
 const callback = "http://localhost:3002";
 
 async function main() {
@@ -12,7 +14,7 @@ async function main() {
   }
 
   const state = JSON.parse(await readFile(stateFile, "utf8"));
-  if (!state.planId) throw new Error("Run setup-demo.mjs first.");
+  if (!state.planId) throw new Error(`Run setup-demo.mjs${demo.name === "MusicBox" ? " --musicbox" : ""} first.`);
 
   const save = () =>
     writeFile(stateFile, JSON.stringify(state, null, 2));
