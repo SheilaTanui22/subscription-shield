@@ -9,6 +9,8 @@ import {
   hypotheticalExclusionAnswer,
   hypotheticalResumptionAnswer,
   hypotheticalResumptionRejectedAnswer,
+  hypotheticalBudgetChangeAnswer,
+  hypotheticalBudgetChangeRejectedAnswer,
   unsupportedAnswer,
   rejectedAnswer,
 } from "../public/budget-templates.mjs";
@@ -305,6 +307,70 @@ describe("hypotheticalResumptionRejectedAnswer", () => {
   test("multiple_names: asks to name one subscription at a time", () => {
     const answer = hypotheticalResumptionRejectedAnswer("multiple_names");
     assert.ok(answer.body.some((line) => line.includes("one subscription at a time")));
+  });
+});
+
+describe("hypotheticalBudgetChangeAnswer", () => {
+  test("absolute: uses the stated amount as the hypothetical budget, not the saved one", () => {
+    const summary = buildBudgetSummary({
+      budget: { amountCents: 2000 },
+      trials: [trial({ renewalPriceCents: 1499 })],
+      paypal: {},
+    });
+    const answer = hypotheticalBudgetChangeAnswer(summary, { amountCents: 10000, relative: false });
+    assert.equal(answer.headline, "Hypothetical: what if your budget were $100.00/mo?");
+    assert.ok(answer.body.some((line) => line.includes("$100.00")));
+    assert.ok(answer.body.some((line) => line.includes("under this hypothetical budget")));
+  });
+
+  test("relative: adds the amount to the saved budget", () => {
+    const summary = buildBudgetSummary({
+      budget: { amountCents: 2000 },
+      trials: [trial({ renewalPriceCents: 1499 })],
+      paypal: {},
+    });
+    const answer = hypotheticalBudgetChangeAnswer(summary, { amountCents: 10000, relative: true });
+    assert.ok(answer.body.some((line) => line.includes("Adding $100.00") && line.includes("$20.00") && line.includes("$120.00")));
+  });
+
+  test("relative with no saved budget: starts from $0", () => {
+    const summary = buildBudgetSummary({ budget: { amountCents: null }, trials: [], paypal: {} });
+    const answer = hypotheticalBudgetChangeAnswer(summary, { amountCents: 10000, relative: true });
+    assert.ok(answer.body.some((line) => line.includes("haven't saved a budget yet") && line.includes("$100.00")));
+  });
+
+  test("never claims the saved budget changed", () => {
+    const summary = buildBudgetSummary({ budget: { amountCents: 2000 }, trials: [], paypal: {} });
+    const answer = hypotheticalBudgetChangeAnswer(summary, { amountCents: 10000, relative: false });
+    assert.ok(answer.body.some((line) => line.includes("Your saved budget was not changed")));
+  });
+
+  test("includes the tracked records breakdown (unlike resumption, this concerns the whole tracked total)", () => {
+    const summary = buildBudgetSummary({
+      budget: { amountCents: null },
+      trials: [trial({ id: "a" }), trial({ id: "b", serviceName: "Other" })],
+      paypal: {},
+    });
+    const answer = hypotheticalBudgetChangeAnswer(summary, { amountCents: 5000, relative: false });
+    assert.equal(answer.includedRecords.length, 2);
+  });
+
+  test("over/under/at are computed via the real budgetComparison function, not duplicated math", () => {
+    const summary = buildBudgetSummary({ budget: { amountCents: null }, trials: [trial({ renewalPriceCents: 1000 })], paypal: {} });
+    const exact = hypotheticalBudgetChangeAnswer(summary, { amountCents: 1000, relative: false });
+    assert.ok(exact.body.some((line) => line.includes("match this hypothetical budget exactly")));
+  });
+});
+
+describe("hypotheticalBudgetChangeRejectedAnswer", () => {
+  test("no_amount: asks for a dollar amount", () => {
+    const answer = hypotheticalBudgetChangeRejectedAnswer("no_amount");
+    assert.ok(answer.body.some((line) => line.includes("Name a dollar amount")));
+  });
+
+  test("invalid_amount: names the unusable amount", () => {
+    const answer = hypotheticalBudgetChangeRejectedAnswer("invalid_amount", { amount: "a lot" });
+    assert.ok(answer.body.some((line) => line.includes("a lot")));
   });
 });
 

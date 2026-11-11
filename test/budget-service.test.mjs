@@ -136,4 +136,55 @@ describe("createBudgetService: answerQuery", () => {
       const result = await service.answerQuery({ intent: "budget_overview", excludeTrialIds: [trial.id] });
       assert.equal(result.summary.potentialRenewals.items.length, 1);
     }));
+
+  test("rejects hypothetical_budget_change with a missing/invalid amountCents", () =>
+    withService(async ({ service }) => {
+      await assert.rejects(service.answerQuery({ intent: "hypothetical_budget_change" }), (error) => {
+        assert.equal(error.status, 400);
+        assert.equal(error.code, "BUDGET_INVALID_AMOUNT");
+        return true;
+      });
+      await assert.rejects(
+        service.answerQuery({ intent: "hypothetical_budget_change", amountCents: -100 }),
+        (error) => {
+          assert.equal(error.code, "BUDGET_INVALID_AMOUNT");
+          return true;
+        }
+      );
+    }));
+
+  test("hypothetical_budget_change (absolute) computes against the hypothetical amount and never saves it", () =>
+    withService(async ({ service, trialService }) => {
+      await trialService.create({
+        serviceName: "DesignNest Demo",
+        trialEndDate: "2099-01-01",
+        renewalPrice: "14.99",
+        currency: "USD",
+        billingFrequency: "monthly",
+      });
+
+      const result = await service.answerQuery({
+        intent: "hypothetical_budget_change",
+        amountCents: 10000,
+        relative: false,
+      });
+      assert.ok(result.answer.body.some((line) => line.includes("$100.00")));
+
+      const savedBudget = await service.getBudget();
+      assert.equal(savedBudget.amountCents, null, "the saved budget must not be touched");
+    }));
+
+  test("hypothetical_budget_change (relative) adds to the saved budget", () =>
+    withService(async ({ service }) => {
+      await service.setBudget({ amount: "20.00" });
+      const result = await service.answerQuery({
+        intent: "hypothetical_budget_change",
+        amountCents: 10000,
+        relative: true,
+      });
+      assert.ok(result.answer.body.some((line) => line.includes("$120.00")));
+
+      const savedBudget = await service.getBudget();
+      assert.equal(savedBudget.amountCents, 2000, "the saved budget must still be the original $20.00");
+    }));
 });

@@ -692,6 +692,139 @@ describe("POST /api/budget/ask: hypothetical resumption (regression)", () => {
   });
 });
 
+describe("POST /api/budget/ask: hypothetical budget change", () => {
+  test('reported question: "What happens if I add $100?" computes against a hypothetical budget, never saves it (amount includes "$", as the real model actually returned)', async () => {
+    const ctx = await startTestServer({
+      conversationClient: stubConversationClient({
+        intent: "hypothetical_budget_change",
+        serviceNames: [],
+        amount: "$100",
+        relative: true,
+      }),
+    });
+    try {
+      await ctx.createTrial({ serviceName: "DesignNest Demo", renewalPrice: "14.99" });
+
+      const response = await fetch(`${ctx.baseUrl}/api/budget/ask`, {
+        method: "POST",
+        headers: ctx.sameOrigin,
+        body: JSON.stringify({ text: "What happens if I add $100?" }),
+      });
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.type, "answer");
+      assert.equal(body.answer.headline, "Hypothetical: what if your budget were $100.00/mo?");
+      assert.ok(body.answer.body.some((line) => line.includes("Your saved budget was not changed")));
+
+      const savedBudget = await fetch(`${ctx.baseUrl}/api/budget`).then((r) => r.json());
+      assert.equal(savedBudget.amountCents, null, "the saved budget must still be unset");
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  test("an ambiguous out-of-scope question (no name, no amount) is refused as unsupported", async () => {
+    const ctx = await startTestServer({
+      conversationClient: stubConversationClient({ intent: "unsupported", serviceNames: [] }),
+    });
+    try {
+      const response = await fetch(`${ctx.baseUrl}/api/budget/ask`, {
+        method: "POST",
+        headers: ctx.sameOrigin,
+        body: JSON.stringify({ text: "What happens if I add $100?" }),
+      });
+      const body = await response.json();
+      assert.equal(body.type, "answer");
+      assert.ok(body.answer.body.some((line) => line.includes("can't cancel, pause, or edit")));
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  test("no amount mentioned is rejected, not silently assumed", async () => {
+    const ctx = await startTestServer({
+      conversationClient: stubConversationClient({
+        intent: "hypothetical_budget_change",
+        serviceNames: [],
+        amount: null,
+        relative: false,
+      }),
+    });
+    try {
+      const response = await fetch(`${ctx.baseUrl}/api/budget/ask`, {
+        method: "POST",
+        headers: ctx.sameOrigin,
+        body: JSON.stringify({ text: "What if I had more budget?" }),
+      });
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.type, "rejected");
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  test("makes no mutation call and does not persist any budget", async () => {
+    const ctx = await startTestServer({
+      conversationClient: stubConversationClient({
+        intent: "hypothetical_budget_change",
+        serviceNames: [],
+        amount: "250",
+        relative: false,
+      }),
+    });
+    try {
+      const response = await fetch(`${ctx.baseUrl}/api/budget/ask`, {
+        method: "POST",
+        headers: ctx.sameOrigin,
+        body: JSON.stringify({ text: "What if my budget were $250?" }),
+      });
+      // If this had somehow called the pauseSubscription/resumeSubscription
+      // stubs (which throw), the handler's catch-all would return non-200.
+      assert.equal(response.status, 200);
+
+      const savedBudget = await fetch(`${ctx.baseUrl}/api/budget`).then((r) => r.json());
+      assert.equal(savedBudget.amountCents, null);
+    } finally {
+      await ctx.close();
+    }
+  });
+});
+
+describe("POST /api/budget/query: hypothetical budget change (no AI)", () => {
+  test("absolute amount via the deterministic endpoint", async () => {
+    const ctx = await startTestServer();
+    try {
+      const response = await fetch(`${ctx.baseUrl}/api/budget/query`, {
+        method: "POST",
+        headers: ctx.sameOrigin,
+        body: JSON.stringify({ intent: "hypothetical_budget_change", amountCents: 5000, relative: false }),
+      });
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.answer.headline, "Hypothetical: what if your budget were $50.00/mo?");
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  test("rejects a missing/invalid amountCents", async () => {
+    const ctx = await startTestServer();
+    try {
+      const response = await fetch(`${ctx.baseUrl}/api/budget/query`, {
+        method: "POST",
+        headers: ctx.sameOrigin,
+        body: JSON.stringify({ intent: "hypothetical_budget_change" }),
+      });
+      assert.equal(response.status, 400);
+      const body = await response.json();
+      assert.equal(body.code, "BUDGET_INVALID_AMOUNT");
+    } finally {
+      await ctx.close();
+    }
+  });
+});
+
 describe("sandbox separation end-to-end", () => {
   test("an ACTIVE PayPal sandbox subscription never contributes to the tracked total", async () => {
     const ctx = await startTestServer({

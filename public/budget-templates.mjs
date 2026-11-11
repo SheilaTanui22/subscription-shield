@@ -1,4 +1,4 @@
-import { formatUsd, formatSignedUsd } from "./budget-calculations.mjs";
+import { formatUsd, formatSignedUsd, budgetComparison } from "./budget-calculations.mjs";
 
 // Deterministic, template-rendered answers for the budget conversation.
 // Every number here comes from the already-computed `summary` (see
@@ -317,6 +317,75 @@ export function hypotheticalResumptionRejectedAnswer(reason, { name } = {}) {
 
   return {
     headline: "I couldn't match that to a resumable subscription",
+    body,
+    includedRecords: [],
+    excludedRecords: [],
+  };
+}
+
+// A "what if I add/increase my budget by $X" (relative) or "what if my
+// budget were $X" (absolute) question. Never touches the saved budget —
+// it builds a throwaway hypothetical one and reuses budgetComparison()
+// (the exact same pure function the real saved-budget comparison uses)
+// against the current tracked total, so the math is identical in kind to
+// every other comparison in this app, just against a number that was
+// never persisted.
+export function hypotheticalBudgetChangeAnswer(summary, { amountCents, relative }) {
+  const items = summary.potentialRenewals.items;
+  const totalCents = summary.potentialRenewals.totalMonthlyEquivalentCents;
+  const savedBudgetCents = summary.budget.amountCents;
+
+  const hypotheticalBudgetCents = relative ? (savedBudgetCents ?? 0) + amountCents : amountCents;
+  const comparison = budgetComparison(hypotheticalBudgetCents, totalCents);
+
+  const body = [];
+
+  if (relative) {
+    body.push(
+      savedBudgetCents === null
+        ? `You haven't saved a budget yet, so this hypothetical starts from $0.00 and adds ${formatUsd(amountCents)}, for a hypothetical budget of ${formatUsd(hypotheticalBudgetCents)}/mo.`
+        : `Adding ${formatUsd(amountCents)} to your saved budget of ${formatUsd(savedBudgetCents)}/mo gives a hypothetical budget of ${formatUsd(hypotheticalBudgetCents)}/mo.`
+    );
+  } else {
+    body.push(
+      savedBudgetCents === null
+        ? `With a hypothetical budget of ${formatUsd(hypotheticalBudgetCents)}/mo (you haven't saved a budget yet):`
+        : `With a hypothetical budget of ${formatUsd(hypotheticalBudgetCents)}/mo instead of your saved ${formatUsd(savedBudgetCents)}/mo:`
+    );
+  }
+
+  body.push(
+    items.length === 0
+      ? "You have no tracked trial renewals right now, so your tracked potential cost is $0.00/mo."
+      : `Your tracked potential cost is ${formatUsd(totalCents)}/mo across ${items.length} record${items.length === 1 ? "" : "s"}.`
+  );
+
+  if (comparison.status === "over") {
+    body.push(`That would be ${formatSignedUsd(comparison.diffCents)} over this hypothetical budget.`);
+  } else if (comparison.status === "under") {
+    body.push(`That would be ${formatUsd(Math.abs(comparison.diffCents))} under this hypothetical budget.`);
+  } else {
+    body.push("That would match this hypothetical budget exactly.");
+  }
+
+  body.push("Your saved budget was not changed — this is a hypothetical comparison only.");
+
+  return {
+    headline: `Hypothetical: what if your budget were ${formatUsd(hypotheticalBudgetCents)}/mo?`,
+    body,
+    includedRecords: items.map(toRecordRow),
+    excludedRecords: [],
+  };
+}
+
+export function hypotheticalBudgetChangeRejectedAnswer(reason, { amount } = {}) {
+  const body =
+    reason === "invalid_amount"
+      ? [`"${amount}" isn't a usable amount — enter a number with up to 2 decimal places (e.g. "100" or "49.99").`]
+      : ["Name a dollar amount to try (e.g. \"What if my budget were $100?\" or \"What if I added $50?\")."];
+
+  return {
+    headline: "I couldn't tell what amount you meant",
     body,
     includedRecords: [],
     excludedRecords: [],

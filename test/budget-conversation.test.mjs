@@ -5,6 +5,7 @@ import {
   interpretQuestion,
   resolveServiceNames,
   resolveResumptionName,
+  resolveBudgetChangeAmount,
   interpretAndResolve,
   MAX_QUESTION_LENGTH,
 } from "../lib/budget-conversation.mjs";
@@ -111,6 +112,47 @@ describe("interpretQuestion", () => {
       return true;
     });
   });
+
+  test("extracts amount and relative for hypothetical_budget_change", async () => {
+    const client = stubClient({
+      intent: "hypothetical_budget_change",
+      serviceNames: [],
+      amount: "100",
+      relative: true,
+    });
+    const result = await interpretQuestion(client, "What happens if I add $100?");
+    assert.equal(result.amount, "100");
+    assert.equal(result.relative, true);
+  });
+
+  test("drops an amount the model invented that never appears in the question (trust-but-verify)", async () => {
+    const client = stubClient({ intent: "hypothetical_budget_change", serviceNames: [], amount: "500", relative: false });
+    const result = await interpretQuestion(client, "What if my budget were $100?");
+    assert.equal(result.amount, null);
+  });
+
+  test("keeps an amount whose thousands-separator the model reformatted (e.g. the question says \"16 060\", the model echoes \"16,060\")", async () => {
+    const client = stubClient({
+      intent: "hypothetical_budget_change",
+      serviceNames: [],
+      amount: "16,060",
+      relative: true,
+    });
+    const result = await interpretQuestion(client, "What happens if I add $16 060?");
+    assert.equal(result.amount, "16,060");
+  });
+
+  test("ignores amount/relative for any intent other than hypothetical_budget_change", async () => {
+    const client = stubClient({
+      intent: "hypothetical_exclusion",
+      serviceNames: ["DesignNest Demo"],
+      amount: "100",
+      relative: true,
+    });
+    const result = await interpretQuestion(client, "What if I don't renew DesignNest Demo for $100?");
+    assert.equal(result.amount, null);
+    assert.equal(result.relative, false);
+  });
 });
 
 describe("resolveServiceNames", () => {
@@ -200,6 +242,40 @@ describe("resolveResumptionName", () => {
       // "unavailable" has no serviceName to match against at all.
       assert.equal(result.type, sandbox.category === "unavailable" ? "not_found" : "resolved");
     }
+  });
+});
+
+describe("resolveBudgetChangeAmount", () => {
+  test("null amount -> no_amount", () => {
+    assert.deepEqual(resolveBudgetChangeAmount(null), { type: "no_amount" });
+  });
+
+  test("a valid decimal resolves to exact cents", () => {
+    assert.deepEqual(resolveBudgetChangeAmount("100"), { type: "resolved", amountCents: 10000 });
+    assert.deepEqual(resolveBudgetChangeAmount("49.99"), { type: "resolved", amountCents: 4999 });
+  });
+
+  test("a leading '$' is stripped before parsing (observed live: the model echoes it despite instructions)", () => {
+    assert.deepEqual(resolveBudgetChangeAmount("$100"), { type: "resolved", amountCents: 10000 });
+    assert.deepEqual(resolveBudgetChangeAmount("$ 49.99"), { type: "resolved", amountCents: 4999 });
+  });
+
+  test("a thousands separator (comma or space) is stripped before parsing", () => {
+    assert.deepEqual(resolveBudgetChangeAmount("16,060"), { type: "resolved", amountCents: 1606000 });
+    assert.deepEqual(resolveBudgetChangeAmount("16 060"), { type: "resolved", amountCents: 1606000 });
+    assert.deepEqual(resolveBudgetChangeAmount("$16,060"), { type: "resolved", amountCents: 1606000 });
+    assert.deepEqual(resolveBudgetChangeAmount("$16 060.50"), { type: "resolved", amountCents: 1606050 });
+  });
+
+  test("a negative amount is invalid_amount, not silently clamped to zero", () => {
+    const result = resolveBudgetChangeAmount("-50");
+    assert.equal(result.type, "invalid_amount");
+  });
+
+  test("a non-numeric amount is invalid_amount", () => {
+    const result = resolveBudgetChangeAmount("a lot");
+    assert.equal(result.type, "invalid_amount");
+    assert.equal(result.amount, "a lot");
   });
 });
 
@@ -408,5 +484,111 @@ describe("interpretAndResolve: hypothetical_resumption", () => {
     });
     assert.equal(result.type, "rejected");
     assert.equal(result.reason, "not_a_subscription");
+  });
+});
+
+// Regression coverage for a follow-up question observed live: "What
+// happens if I add $100?" was previously classified "unsupported" (no
+// budget-change intent existed at all). The AI classification itself is
+// mocked here; see the live-Ollama verification notes for the real model.
+describe("interpretAndResolve: hypothetical_budget_change", () => {
+  const trials = [];
+  const sandbox = { category: "unavailable", reason: "x" };
+
+  test('reported question: "What happens if I add $100?" (relative) — amount includes "$", as the real model actually returned', async () => {
+    const client = stubClient({
+      intent: "hypothetical_budget_change",
+      serviceNames: [],
+      amount: "$100",
+      relative: true,
+    });
+    const result = await interpretAndResolve({
+      client,
+      text: "What happens if I add $100?",
+      trials,
+      paypalSandbox: sandbox,
+    });
+    assert.equal(result.type, "resolved");
+    assert.equal(result.intent, "hypothetical_budget_change");
+    assert.equal(result.amountCents, 10000);
+    assert.equal(result.relative, true);
+  });
+
+  test('reported question: "What happens if I add $16 060?" — a thousands-separated amount', async () => {
+    const client = stubClient({
+      intent: "hypothetical_budget_change",
+      serviceNames: [],
+      amount: "$16 060",
+      relative: true,
+    });
+    const result = await interpretAndResolve({
+      client,
+      text: "What happens if I add $16 060?",
+      trials,
+      paypalSandbox: sandbox,
+    });
+    assert.equal(result.type, "resolved");
+    assert.equal(result.amountCents, 1606000);
+  });
+
+  test('paraphrase: "What if my budget were $100?" (absolute) — amount includes "$"', async () => {
+    const client = stubClient({
+      intent: "hypothetical_budget_change",
+      serviceNames: [],
+      amount: "$100",
+      relative: false,
+    });
+    const result = await interpretAndResolve({
+      client,
+      text: "What if my budget were $100?",
+      trials,
+      paypalSandbox: sandbox,
+    });
+    assert.equal(result.type, "resolved");
+    assert.equal(result.amountCents, 10000);
+    assert.equal(result.relative, false);
+  });
+
+  test("no amount given is rejected with reason no_amount", async () => {
+    const client = stubClient({ intent: "hypothetical_budget_change", serviceNames: [], amount: null, relative: false });
+    const result = await interpretAndResolve({
+      client,
+      text: "What if I had more budget?",
+      trials,
+      paypalSandbox: sandbox,
+    });
+    assert.equal(result.type, "rejected");
+    assert.equal(result.reason, "no_amount");
+  });
+
+  test("an invalid amount is rejected with reason invalid_amount", async () => {
+    const client = stubClient({
+      intent: "hypothetical_budget_change",
+      serviceNames: [],
+      amount: "lots",
+      relative: false,
+    });
+    const result = await interpretAndResolve({
+      client,
+      text: "What if I had lots more budget?",
+      trials,
+      paypalSandbox: sandbox,
+    });
+    assert.equal(result.type, "rejected");
+    assert.equal(result.reason, "invalid_amount");
+  });
+
+  test("a question naming a specific subscription is never classified hypothetical_budget_change", async () => {
+    // Guards the "add StreamBox back" vs "add $100" distinction: the
+    // resumption question must never get misrouted into budget-change
+    // just because both involve the word "add".
+    const client = stubClient({ intent: "hypothetical_resumption", serviceNames: ["StreamBox"], negated: false });
+    const result = await interpretAndResolve({
+      client,
+      text: "What happens if I add StreamBox back?",
+      trials,
+      paypalSandbox: { category: "paused", serviceName: "StreamBox" },
+    });
+    assert.equal(result.intent, "hypothetical_resumption");
   });
 });
