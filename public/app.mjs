@@ -333,14 +333,14 @@ function renderCard(summary) {
   const nextBillingText = summary.status === "SUSPENDED" ? null : formatDateTime(summary.nextBillingTime);
   const lastPaymentText = formatDateTime(summary.lastPaymentTime);
   const updatedAtText = formatDateTime(summary.statusUpdateTime);
-  const serviceName = (summary.planName ?? "StreamBox").split(":")[0].trim();
+  const serviceName = (summary.planName ?? summary.serviceName ?? "PayPal subscription").split(":")[0].trim();
 
   const top = el("div", { className: "sub-card-top" }, [
     el("div", { className: "sub-identity" }, [
       el("div", { className: "monogram" }, [icon("play")]),
       el("div", {}, [
         el("div", { className: "sub-name", text: serviceName }),
-        el("span", { className: "sub-tagline", text: "Streaming subscription" }),
+        el("span", { className: "sub-tagline", text: "PayPal sandbox subscription" }),
       ]),
     ]),
     el("span", { className: `status-badge ${status.cls}` }, [
@@ -366,11 +366,11 @@ function renderCard(summary) {
   const actions = el("div", { className: "sub-actions" });
   if (summary.status === "ACTIVE") {
     const pauseButton = el("button", { type: "button", className: "btn btn-outline", text: "Pause subscription" });
-    pauseButton.addEventListener("click", () => handleAction("pause", pauseButton));
+    pauseButton.addEventListener("click", () => handleAction("pause", pauseButton, summary));
     actions.appendChild(pauseButton);
   } else if (summary.status === "SUSPENDED") {
     const resumeButton = el("button", { type: "button", className: "btn btn-primary", text: "Resume subscription" });
-    resumeButton.addEventListener("click", () => handleAction("resume", resumeButton));
+    resumeButton.addEventListener("click", () => handleAction("resume", resumeButton, summary));
     actions.appendChild(resumeButton);
   }
 
@@ -394,9 +394,20 @@ function renderCard(summary) {
     el("p", { text: contextMessage(summary) }),
   ]);
 
-  app.replaceChildren(card, context);
+  return el("div", { className: "paypal-subscription", "data-subscription-id": summary.subscriptionId }, [card, context]);
+}
 
-  setSummary("1", summary.status === "ACTIVE" ? "1" : "0", summary.status === "SUSPENDED" ? "1" : "0");
+function renderCards(subscriptions) {
+  const cards = subscriptions.map((item) => item.summary ? renderCard(item.summary) :
+    el("div", { className: "state-panel is-error" }, [
+      icon("alert"),
+      el("p", { text: `${item.serviceName}: PayPal data is unavailable. ${item.error}` }),
+    ]));
+  app.replaceChildren(...cards);
+  const incomplete = subscriptions.some((item) => !item.summary);
+  setSummary(String(subscriptions.length),
+    incomplete ? "—" : String(subscriptions.filter((item) => item.summary.status === "ACTIVE").length),
+    incomplete ? "—" : String(subscriptions.filter((item) => item.summary.status === "SUSPENDED").length));
 }
 
 async function load() {
@@ -404,7 +415,7 @@ async function load() {
   renderSkeleton();
 
   try {
-    const response = await fetch("/api/subscription", { headers: { Accept: "application/json" } });
+    const response = await fetch("/api/subscriptions", { headers: { Accept: "application/json" } });
     const data = await response.json();
 
     if (response.status === 404) {
@@ -412,11 +423,11 @@ async function load() {
       return;
     }
     if (!response.ok) {
-      renderErrorState(data.error ?? "Could not load the subscription.");
+      renderErrorState(data.error ?? "Could not load the subscriptions.");
       return;
     }
 
-    renderCard(data);
+    renderCards(data.subscriptions);
   } catch {
     renderErrorState("Could not reach the Subscription Shield server.");
   } finally {
@@ -424,13 +435,14 @@ async function load() {
   }
 }
 
-async function handleAction(kind, button) {
+async function handleAction(kind, button, subscription) {
   if (busy) return;
 
+  const serviceName = (subscription.planName ?? subscription.serviceName ?? "this subscription").split(":")[0].trim();
   const confirmed = window.confirm(
     kind === "pause"
-      ? "Pause this subscription? Billing will stop immediately until you resume it."
-      : "Resume this subscription? This re-enables billing under the plan's terms."
+      ? `Pause ${serviceName}? This suspends its PayPal sandbox billing until it is resumed.`
+      : `Resume ${serviceName}? This re-enables its PayPal sandbox billing under the plan's terms.`
   );
   if (!confirmed) return;
 
@@ -442,7 +454,7 @@ async function handleAction(kind, button) {
   refreshButton.disabled = true;
 
   try {
-    const response = await fetch(`/api/subscription/${kind}`, {
+    const response = await fetch(`/api/subscriptions/${encodeURIComponent(subscription.subscriptionId)}/${kind}`, {
       method: "POST",
       headers: { Accept: "application/json" },
     });
@@ -454,8 +466,8 @@ async function handleAction(kind, button) {
       showBanner(
         "success",
         kind === "pause"
-          ? "Paused — PayPal confirmed billing is now stopped."
-          : "Resumed — PayPal confirmed billing is active again."
+          ? `${serviceName} paused — PayPal confirmed the suspended status.`
+          : `${serviceName} resumed — PayPal confirmed the active status.`
       );
     } else {
       showBanner(
@@ -464,11 +476,7 @@ async function handleAction(kind, button) {
       );
     }
 
-    if (data.subscription) {
-      renderCard(data.subscription);
-    } else {
-      await load();
-    }
+    await Promise.all([load(), loadBudgetSummary()]);
   } catch {
     showBanner("error", `Could not reach the server to ${kind} the subscription.`);
     button.disabled = false;
@@ -1189,7 +1197,7 @@ function renderBudgetSummary(summary) {
     budgetSummaryDiffLabel.textContent = "At budget";
   }
 
-  budgetSandboxNoteEl.textContent = sandboxNote(summary.paypalSandbox);
+  budgetSandboxNoteEl.textContent = sandboxNote(summary.paypalSandboxes ?? summary.paypalSandbox);
 }
 
 function renderScenarioNote() {

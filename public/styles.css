@@ -355,6 +355,10 @@ summary {
 
 /* ---------- Subscription card ---------- */
 
+.paypal-subscription + .paypal-subscription {
+  margin-top: 24px;
+}
+
 .sub-card {
   background: var(--surface);
   border: 1px solid var(--border);

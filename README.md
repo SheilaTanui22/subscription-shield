@@ -1,6 +1,6 @@
 # Subscription Shield
 
-A small local web app for keeping free-trial renewals and a subscription from quietly costing you money. It tracks trial end dates with reminders and a calendar export, demonstrates pausing/resuming a real subscription against PayPal's **sandbox** API and adds a budget conversation that compares what you've tracked against a monthly budget you set, with every number calculated in code, never guessed by an AI model.
+A small local web app for keeping free-trial renewals and subscriptions from quietly costing you money. It tracks trial end dates with reminders and a calendar export, demonstrates pausing/resuming sandbox subscriptions against PayPal's **sandbox** API and adds a budget conversation that compares what you've tracked against a monthly budget you set, with every number calculated in code, never guessed by an AI model.
 
 ## Problem it addresses
 
@@ -10,18 +10,18 @@ Free trials and small subscriptions are easy to forget about and hard to reason 
 
 | Feature | What it does | Limits |
 |---|---|---|
-| **PayPal sandbox subscription** | Shows the status, price and billing dates of **one** demo subscription created by this project's own setup scripts; pause/resume it from the dashboard. | Sandbox-only and scoped to the one subscription this project creates for itself. It cannot discover, list or act on a real user's own PayPal subscriptions, there is no such API call anywhere in this codebase. |
+| **PayPal sandbox subscriptions** | Shows the status, price and billing dates of StreamBox and an optional MusicBox demo created by this project's setup scripts; each has its own pause/resume control. | Sandbox-only and scoped to the subscriptions this project creates for its merchant account. It cannot discover, list or act on a real user's own PayPal subscriptions, there is no such API call anywhere in this codebase. |
 | **Free trial tracking** | Add, edit, delete and see day-count/"ending soon" status for trials you enter yourself or import from pasted text. | Tracking-only: dates and prices you (or an AI extraction) entered. Nothing here is connected to the provider and nothing cancels billing automatically. |
 | **"Import from text" (AI-assisted)** | Pastes a confirmation email/receipt and extracts service name, end date, price, etc. via a local Ollama model. Every field is shown with its supporting quote for you to verify before saving. | Every extracted field still requires your review and an explicit Save, nothing is stored until you confirm it. Unavailable if Ollama isn't running. |
 | **Upcoming trial deadlines** | In-dashboard alerts for trials nearing their reminder window. | Only visible while the dashboard tab is open, no email, push or background notifications. |
 | **Calendar export (.ics)** | Downloads a one-time calendar file with a single reminder alert for a trial. | A static snapshot: editing or deleting the trial afterward does not update or remove the calendar event and re-downloading creates a duplicate, not a replacement. |
-| **Budget conversation** | Set a monthly budget; see it compared against your tracked trial renewals (labeled as planned/potential costs, not bank spending); ask suggested or free-text questions, including "what if I don't renew X" hypotheticals. | All arithmetic happens in plain code, the AI model (when used) only classifies which question you're asking and which record you mean; it never computes or states a dollar amount itself. Hypothetical questions never change, pause, or cancel anything. The sandbox PayPal subscription's amount is never added into this total. |
+| **Budget conversation** | Set a monthly budget; see it compared against your tracked trial renewals (labeled as planned/potential costs, not bank spending); ask suggested or free-text questions, including "what if I don't renew X" and "what if I resume MusicBox" hypotheticals. | All arithmetic happens in plain code, the AI model (when used) only classifies which question you're asking and which record you mean; it never computes or states a dollar amount itself. Hypothetical questions never change, pause, or cancel anything. The sandbox PayPal subscription's amount is never added into this total. |
 
 ## Architecture & stack
 
 - **Runtime**: plain Node.js (`node:http`, ES modules, built-in `node:test`) — **zero npm dependencies**, no framework, no build step.
 - **Frontend**: hand-written HTML/CSS/vanilla JS served as static files from `public/`; no bundler.
-- **Storage**: local JSON files (`trials.json`, `budget.json`, `demo-state.json`), each written through an atomic temp-file-then-rename with an in-process write queue so concurrent requests can't corrupt them. All three are git-ignored and created automatically on first use.
+- **Storage**: local JSON files, all git-ignored. Trial and budget stores (`trials.json`, `budget.json`) use atomic temp-file-then-rename updates with in-process write queues. The setup scripts create separate PayPal resource state files (`demo-state.json`, `musicbox-demo-state.json`) and reuse their saved IDs when rerun.
 - **PayPal**: the official sandbox REST API (`https://api-m.sandbox.paypal.com`), called directly via `fetch` — no PayPal SDK.
 - **AI**: a single active provider, picked by `AI_PROVIDER`:
   - `ollama` (default) — calls a local Ollama server over loopback only; refuses to call anything else.
@@ -71,10 +71,23 @@ pause-demo.mjs        CLI: pauses the sandbox subscription (same action the UI b
 
 PayPal sandbox testing needs **two different sandbox accounts**, created under **Sandbox → Accounts** at developer.paypal.com:
 
-- A **Business (merchant)** sandbox account — this is whose REST API app gives you `PAYPAL_CLIENT_ID`/`PAYPAL_CLIENT_SECRET`. This is the identity the server authenticates as, and whose one demo subscription the dashboard shows.
+- A **Business (merchant)** sandbox account — this is whose REST API app gives you `PAYPAL_CLIENT_ID`/`PAYPAL_CLIENT_SECRET`. This is the identity the server authenticates as, and whose demo subscriptions the dashboard shows.
 - A **Personal (buyer)** sandbox account — used only to click through the PayPal approval screen that `subscribe-demo.mjs` links you to. Log into developer.paypal.com's sandbox buyer credentials (not your real PayPal login) when prompted.
 
-The app only ever acts on the single subscription these scripts create for the merchant account — it has no code path that lists or manages a buyer's other subscriptions.
+The app only ever acts on the registered demo subscriptions these scripts create for the merchant account — it has no code path that lists or manages a buyer's other subscriptions.
+
+### Add the second PayPal sandbox demo (MusicBox, USD 8/month)
+
+Keep your existing StreamBox `demo-state.json`. The following commands use a separate, git-ignored `musicbox-demo-state.json` and reuse its saved IDs on subsequent runs:
+
+```bash
+node --env-file=.env setup-demo.mjs --musicbox
+node --env-file=.env subscribe-demo.mjs --musicbox
+```
+
+Stop any earlier `subscribe-demo.mjs` callback server on port 3002 first. Open the printed MusicBox approval link, sign in with your sandbox buyer, and approve. Only after PayPal confirms approval will its card offer pause/resume. Restart the app after updating its code, then refresh the dashboard to see both subscriptions. MusicBox has a USD 8.00 monthly plan with no free-trial cycle; StreamBox retains its existing terms and status.
+
+Each action is bound to that card's registered subscription ID. AI questions must name one subscription, and neither a hypothetical question nor an action on MusicBox changes StreamBox. Sandbox amounts stay separate from tracked trial costs. The server reads both state files without migrating or overwriting the original.
 
 ### Ollama setup (local, free — the default)
 
@@ -101,7 +114,7 @@ Everything except the two features that explicitly call an AI model:
 npm.cmd test
 ```
 
-Runs the full `node:test` suite (362 tests at the time of writing) — unit tests for validation/calculation/storage modules, and HTTP integration tests that spin up the real router against temp-file storage and a stubbed PayPal/AI client. No network access, real PayPal credentials, or a running Ollama instance are required for the test suite to pass.
+Runs the full `node:test` suite — unit tests for validation/calculation/storage modules, and HTTP integration tests that spin up the real router against temp-file storage and a stubbed PayPal/AI client. No network access, real PayPal credentials, or a running Ollama instance are required for the test suite to pass.
 
 ## Troubleshooting
 

@@ -27,6 +27,7 @@ function toRecordRow(item) {
 }
 
 export function sandboxNote(paypalSandbox) {
+  if (Array.isArray(paypalSandbox)) return paypalSandbox.map(sandboxNote).join(" ");
   if (paypalSandbox.category === "active") {
     return `Your PayPal sandbox subscription (${paypalSandbox.serviceName}) is active at ${formatUsd(
       paypalSandbox.monthlyEquivalentCents
@@ -59,7 +60,7 @@ export function budgetOverviewAnswer(summary) {
       : `Across ${items.length} tracked record${items.length === 1 ? "" : "s"}, your tracked potential cost is ${formatUsd(
           total
         )}/mo. These are planned/potential costs from trial records you've added — not a record of actual bank spending.`,
-    sandboxNote(summary.paypalSandbox),
+    sandboxNote(summary.paypalSandboxes ?? summary.paypalSandbox),
   ];
 
   if (summary.comparison.status === "over") {
@@ -218,20 +219,11 @@ function planTermsLabel(sandbox) {
 // A "what if I resume/unpause/add X back" question — or its negation,
 // "what if I DON'T resume/unpause X" (`negated: true`). Distinct from
 // hypothetical_exclusion (which is about NOT renewing a tracked trial) —
-// this is only ever about the one sandbox PayPal subscription, since
+// this is only ever about the selected sandbox PayPal subscription, since
 // trials have no active/paused state to resume.
 //
-// It never invents a next charge date, an immediate charge, or a savings
-// figure. The "next charge date can't currently be confirmed" claim leads
-// every time, and is NOT attributed to this app's own `nextBillingTime:
-// null` suppression for non-active subscriptions (see
-// subscription-service.mjs) — that's an internal display choice, not
-// evidence of what PayPal itself reports. The follow-up detail (PayPal's
-// own data not currently including a next billing date) is scoped to
-// *this subscription's* observed data only — verified once against the
-// raw PayPal API response for this one SUSPENDED subscription, not
-// generalized into a blanket claim about every paused PayPal
-// subscription's behavior, which hasn't been verified.
+// Never infer billing timing for a newly added subscription from the
+// original demo's observed response, or from the app's date suppression.
 export function hypotheticalResumptionAnswer(summary, { negated = false } = {}) {
   const sandbox = summary.paypalSandbox;
   const name = sandbox.serviceName ?? "your PayPal sandbox subscription";
@@ -258,7 +250,7 @@ export function hypotheticalResumptionAnswer(summary, { negated = false } = {}) 
           : "Its plan price, currency, and billing frequency could not be verified, so this can't describe exact billing terms."
       );
       body.push(
-        "The next charge date can't currently be confirmed — PayPal's own data for this subscription doesn't currently include a next billing date."
+        "The next charge date can't currently be confirmed for this subscription."
       );
       body.push("No subscription was changed — this is a hypothetical comparison only.");
       body.push("To actually resume it, use the existing Resume subscription control on the dashboard.");
@@ -304,16 +296,18 @@ export function hypotheticalResumptionRejectedAnswer(reason, { name } = {}) {
   const body =
     RESUMPTION_REJECTION_BODY[reason] ??
     (reason === "not_found"
-      ? [`No tracked subscription was found named "${name}". Check the spelling — this app only tracks one PayPal sandbox subscription.`]
+      ? [`No tracked subscription was found named "${name}". Check the spelling against the PayPal sandbox cards.`]
       : reason === "not_a_subscription"
         ? [
-            `"${name}" is a tracked trial, not a subscription with an active/paused status — there's nothing to resume or unpause. Only the PayPal sandbox subscription has that state.`,
+            `"${name}" is a tracked trial, not a subscription with an active/paused status — there's nothing to resume or unpause. Only PayPal sandbox subscriptions have that state.`,
           ]
         : reason === "name_collision"
           ? [
               `Both a tracked trial and the PayPal sandbox subscription are named "${name}". Resuming only applies to the PayPal sandbox subscription — ask again if that's what you meant.`,
             ]
-          : ["Could not determine which subscription you meant."]);
+          : reason === "duplicate_subscription_name"
+            ? [`More than one PayPal subscription is named "${name}". Use the dashboard cards to identify the subscription; this chat will not guess.`]
+            : ["Could not determine which subscription you meant."]);
 
   return {
     headline: "I couldn't match that to a resumable subscription",

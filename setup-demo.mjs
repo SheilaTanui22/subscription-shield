@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { demoConfiguration } from "./lib/demo-config.mjs";
 
 const base = process.env.PAYPAL_BASE_URL;
 const clientId = process.env.PAYPAL_CLIENT_ID;
@@ -13,7 +14,8 @@ if (!clientId || !secret) {
   throw new Error("Missing PayPal credentials.");
 }
 
-const stateFile = new URL("./demo-state.json", import.meta.url);
+const demo = demoConfiguration(process.argv.slice(2));
+const stateFile = new URL(`./${demo.fileName}`, import.meta.url);
 let state;
 
 try {
@@ -31,6 +33,7 @@ async function save() {
 }
 
 async function main() {
+  state.serviceName ??= demo.name;
   await save();
 
   const auth = await fetch(`${base}/v1/oauth2/token`, {
@@ -83,8 +86,8 @@ async function main() {
     const product = await create(
       "/v1/catalogs/products",
       {
-        name: "StreamBox — Subscription Shield Demo",
-        description: "Fictional streaming service for sandbox testing.",
+        name: `${demo.name} — Subscription Shield Demo`,
+        description: "Fictional subscription service for sandbox testing.",
         type: "SERVICE",
         category: "SOFTWARE",
       },
@@ -100,22 +103,22 @@ async function main() {
       "/v1/billing/plans",
       {
         product_id: state.productId,
-        name: "StreamBox: 7 days free, then USD 12 monthly",
+        name: `${demo.name}: ${demo.trialDays ? `${demo.trialDays} days free, then ` : ""}USD ${demo.price} monthly`,
         status: "ACTIVE",
         billing_cycles: [
-          {
-            frequency: { interval_unit: "DAY", interval_count: 7 },
+          ...(demo.trialDays ? [{
+            frequency: { interval_unit: "DAY", interval_count: demo.trialDays },
             tenure_type: "TRIAL",
             sequence: 1,
             total_cycles: 1,
-          },
+          }] : []),
           {
             frequency: { interval_unit: "MONTH", interval_count: 1 },
             tenure_type: "REGULAR",
-            sequence: 2,
+            sequence: demo.trialDays ? 2 : 1,
             total_cycles: 0,
             pricing_scheme: {
-              fixed_price: { value: "12.00", currency_code: "USD" },
+              fixed_price: { value: demo.price, currency_code: "USD" },
             },
           },
         ],
@@ -131,11 +134,11 @@ async function main() {
     await save();
   }
 
-  console.log("SUCCESS: StreamBox sandbox plan is ready.");
+  console.log(`SUCCESS: ${demo.name} sandbox plan is ready.`);
   console.log("Product ID:", state.productId);
   console.log("Plan ID:", state.planId);
-  console.log("Terms: 7 days free, then USD 12/month.");
-  console.log("No buyer has subscribed yet.");
+  console.log(`Terms: ${demo.trialDays ? `${demo.trialDays} days free, then ` : ""}USD ${demo.price}/month.`);
+  console.log(state.subscriptionId ? "Existing subscription preserved." : "No buyer has subscribed yet.");
 }
 
 main().catch(error => {

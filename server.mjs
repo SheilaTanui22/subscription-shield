@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { loadPayPalConfig, createPayPalClient } from "./lib/paypal-client.mjs";
-import { pauseSubscription, resumeSubscription, loadDemoState, fetchSubscriptionSummary } from "./lib/subscription-service.mjs";
+import { pauseSubscription, resumeSubscription, loadDemoStates, fetchSubscriptionSummaries } from "./lib/subscription-service.mjs";
 import { createTrialStore } from "./lib/trial-store.mjs";
 import { createTrialService } from "./lib/trial-service.mjs";
 import { createAIClient } from "./lib/ai-provider.mjs";
@@ -18,6 +18,7 @@ const paypalConfig = loadPayPalConfig(process.env);
 const client = createPayPalClient(paypalConfig);
 
 const stateFileUrl = new URL("./demo-state.json", import.meta.url);
+const stateFileUrls = [stateFileUrl, new URL("./musicbox-demo-state.json", import.meta.url)];
 const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "public");
 
 // Runtime trial data lives next to the other local state files (not inside
@@ -36,8 +37,8 @@ const budgetService = createBudgetService({
   budgetStore,
   trialService,
   fetchPaypalSummary: async () => {
-    const state = await loadDemoState(stateFileUrl);
-    return fetchSubscriptionSummary(client, state);
+    const states = await loadDemoStates(stateFileUrls);
+    return fetchSubscriptionSummaries(client, states);
   },
 });
 
@@ -62,6 +63,7 @@ const handleRequest = createRequestHandler({
   port: PORT,
   client,
   stateFileUrl,
+  stateFileUrls,
   pauseSubscription,
   resumeSubscription,
   trialService,
