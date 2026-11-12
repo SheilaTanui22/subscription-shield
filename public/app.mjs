@@ -15,6 +15,8 @@ const summaryPaused = document.getElementById("summary-paused");
 const trialsList = document.getElementById("trials-list");
 const deadlinesList = document.getElementById("deadlines-list");
 const addTrialButton = document.getElementById("add-trial-button");
+const enableNotificationsButton = document.getElementById("enable-notifications-button");
+const notificationsButtonLabel = document.getElementById("notifications-button-label");
 
 const trialDialog = document.getElementById("trial-dialog");
 const trialDialogTitle = document.getElementById("trial-dialog-title");
@@ -82,6 +84,11 @@ let pendingImportSource = false;
 let importBusy = false;
 let lastDateKey = null;
 let calendarTrial = null;
+// Native browser Notification popups are opt-in (and only fire while this
+// tab is open and loaded — see the panel note). `notifiedTrialIds` stops
+// the same trial from re-notifying on every render/60s tick once it's
+// already fired once this page load.
+const notifiedTrialIds = new Set();
 let budgetBusy = false;
 let askBusy = false;
 // The "currently selected scenario" for the hypothetical-exclusion
@@ -490,6 +497,53 @@ async function handleAction(kind, button, subscription) {
 
 // ---------- Free trials: list + upcoming deadlines ----------
 
+function notificationsSupported() {
+  return typeof Notification !== "undefined";
+}
+
+function updateNotificationsButton() {
+  if (!notificationsSupported()) {
+    enableNotificationsButton.hidden = true;
+    return;
+  }
+  if (Notification.permission === "granted") {
+    notificationsButtonLabel.textContent = "Browser notifications on";
+    enableNotificationsButton.disabled = true;
+  } else if (Notification.permission === "denied") {
+    notificationsButtonLabel.textContent = "Browser notifications blocked (check site settings)";
+    enableNotificationsButton.disabled = true;
+  } else {
+    notificationsButtonLabel.textContent = "Enable browser notifications";
+    enableNotificationsButton.disabled = false;
+  }
+}
+
+// Fires a real native Notification popup (not a fake/in-page toast) for
+// each trial that's newly due this page load. Opt-in, and only fires
+// while this tab is open and loaded — never while the browser is fully
+// closed, and never via email or a push server (see the panel note).
+function notifyDueTrials(due) {
+  if (!notificationsSupported() || Notification.permission !== "granted") return;
+  for (const trial of due) {
+    if (notifiedTrialIds.has(trial.id)) continue;
+    notifiedTrialIds.add(trial.id);
+    const status = presentTrialStatus(trialStatus(trial));
+    new Notification(`Subscription Shield: ${trial.serviceName}`, {
+      body: `${status.label} — ends ${formatCalendarDate(trial.trialEndDate)}.`,
+      tag: `trial-${trial.id}`,
+    });
+  }
+}
+
+async function handleEnableNotifications() {
+  if (!notificationsSupported()) return;
+  const permission = await Notification.requestPermission();
+  updateNotificationsButton();
+  if (permission === "granted") {
+    notifyDueTrials(trials.filter((trial) => isDueForReminder(trial)));
+  }
+}
+
 function renderDeadlines() {
   if (trials.length === 0) {
     deadlinesList.replaceChildren(
@@ -499,6 +553,7 @@ function renderDeadlines() {
   }
 
   const due = trials.filter((trial) => isDueForReminder(trial));
+  notifyDueTrials(due);
 
   if (due.length === 0) {
     deadlinesList.replaceChildren(
@@ -1519,6 +1574,8 @@ budgetAskForm.addEventListener("submit", (event) => {
 });
 
 refreshButton.addEventListener("click", load);
+enableNotificationsButton.addEventListener("click", handleEnableNotifications);
+updateNotificationsButton();
 
 load();
 loadTrials();
